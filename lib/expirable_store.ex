@@ -236,10 +236,35 @@ defmodule ExpirableStore do
               else
                 entry
               end
+
+            {:__refreshing__, old_entry} ->
+              # Refresh in progress - return old value or wait
+              handle_refreshing_state(local_pid, old_entry)
           end
         else
           create_or_fetch_local(key, fetch_fn, refresh)
         end
+    end
+  end
+
+  defp handle_refreshing_state(_pid, {:ok, _, _} = old_entry), do: old_entry
+
+  defp handle_refreshing_state(pid, :error) do
+    wait_for_refresh_local(pid)
+  end
+
+  defp wait_for_refresh_local(pid) do
+    case Agent.get(pid, & &1) do
+      {:__refreshing__, _} ->
+        Process.sleep(10)
+        wait_for_refresh_local(pid)
+
+      {:__pending__, _} ->
+        Process.sleep(10)
+        wait_for_refresh_local(pid)
+
+      value ->
+        value
     end
   end
 
@@ -287,10 +312,30 @@ defmodule ExpirableStore do
   end
 
   defp refetch_local(pid, key, fetch_fn, refresh) do
-    new_entry = fetch_fn.()
-    Agent.update(pid, fn _ -> new_entry end)
-    schedule_eager_refresh_local(key, new_entry, fetch_fn, refresh)
-    new_entry
+    # CAS: acquire refresh lock
+    case Agent.get_and_update(pid, fn
+           {:__refreshing__, old_entry} ->
+             # Already refreshing - return old entry
+             {{:already_refreshing, old_entry}, {:__refreshing__, old_entry}}
+
+           entry ->
+             # Start refresh - set refreshing state
+             {{:do_refresh, entry}, {:__refreshing__, entry}}
+         end) do
+      {:do_refresh, _old_entry} ->
+        new_entry = fetch_fn.()
+        Agent.update(pid, fn {:__refreshing__, _} -> new_entry end)
+        schedule_eager_refresh_local(key, new_entry, fetch_fn, refresh)
+        new_entry
+
+      {:already_refreshing, {:ok, _, _} = old_entry} ->
+        # Already refreshing, return old (possibly expired) value
+        old_entry
+
+      {:already_refreshing, :error} ->
+        # Already refreshing but no old value - wait for result
+        wait_for_refresh_local(pid)
+    end
   end
 
   defp get_local_agent(key) do
@@ -391,9 +436,24 @@ defmodule ExpirableStore do
 
       pid ->
         if Process.alive?(pid) do
-          new_entry = fetch_fn.()
-          Agent.update(pid, fn _ -> new_entry end)
-          schedule_eager_refresh_local(key, new_entry, fetch_fn, :eager)
+          # CAS: acquire refresh lock
+          case Agent.get_and_update(pid, fn
+                 {:__refreshing__, _} = state ->
+                   # Already refreshing - skip
+                   {:already_refreshing, state}
+
+                 entry ->
+                   # Start refresh
+                   {:do_refresh, {:__refreshing__, entry}}
+               end) do
+            :do_refresh ->
+              new_entry = fetch_fn.()
+              Agent.update(pid, fn {:__refreshing__, _} -> new_entry end)
+              schedule_eager_refresh_local(key, new_entry, fetch_fn, :eager)
+
+            :already_refreshing ->
+              :ok
+          end
         end
     end
   end
