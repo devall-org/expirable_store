@@ -30,6 +30,7 @@ defmodule ExpirableStore.MixProject do
   defp deps do
     [
       {:spark, "~> 2.0"},
+      {:sourceror, "~> 1.7", only: [:dev, :test], runtime: false},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
     ]
   end
