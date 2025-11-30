@@ -176,7 +176,11 @@ defmodule ExpirableStore do
     group
     |> get_all_cluster_agents()
     |> Enum.each(fn pid ->
-      Agent.update(pid, fn _ -> new_entry end)
+      try do
+        Agent.update(pid, fn _ -> new_entry end)
+      catch
+        _, _ -> :ok
+      end
     end)
   end
 
@@ -189,7 +193,7 @@ defmodule ExpirableStore do
 
     case get_local_agent(key) do
       nil ->
-        create_and_fetch_local(key, fetch_fn, refresh)
+        create_or_fetch_local(key, fetch_fn, refresh)
 
       local_pid ->
         if Process.alive?(local_pid) do
@@ -205,27 +209,52 @@ defmodule ExpirableStore do
               end
           end
         else
-          create_and_fetch_local(key, fetch_fn, refresh)
+          create_or_fetch_local(key, fetch_fn, refresh)
         end
     end
   end
 
-  defp create_and_fetch_local(key, fetch_fn, refresh) do
-    initial_value = fetch_fn.()
+  # Handle race condition: create agent with pending marker, then fetch value
+  # This ensures fetch_fn is called only once even with concurrent requests
+  defp create_or_fetch_local(key, fetch_fn, refresh) do
+    pending_ref = make_ref()
 
     spec = %{
       id: {:local, key},
       start:
         {Agent, :start_link,
-         [fn -> initial_value end, [name: {:via, Registry, {ExpirableStore.LocalRegistry, key}}]]},
+         [
+           fn -> {:__pending__, pending_ref} end,
+           [name: {:via, Registry, {ExpirableStore.LocalRegistry, key}}]
+         ]},
       restart: :temporary
     }
 
-    {:ok, pid} = DynamicSupervisor.start_child(ExpirableStore.Supervisor, spec)
+    case DynamicSupervisor.start_child(ExpirableStore.Supervisor, spec) do
+      {:ok, pid} ->
+        # We won the race, fetch the value
+        value = fetch_fn.()
 
-    schedule_eager_refresh_local(key, initial_value, fetch_fn, refresh)
+        Agent.update(pid, fn {:__pending__, ^pending_ref} -> value end)
 
-    Agent.get(pid, & &1)
+        value
+        |> tap(fn v -> schedule_eager_refresh_local(key, v, fetch_fn, refresh) end)
+
+      {:error, {:already_started, pid}} ->
+        # Another process is fetching, wait for result
+        wait_for_local_value(pid)
+    end
+  end
+
+  defp wait_for_local_value(pid) do
+    case Agent.get(pid, & &1) do
+      {:__pending__, ref} when is_reference(ref) ->
+        Process.sleep(10)
+        wait_for_local_value(pid)
+
+      value ->
+        value
+    end
   end
 
   defp refetch_local(pid, key, fetch_fn, refresh) do
