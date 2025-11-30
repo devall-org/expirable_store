@@ -18,12 +18,7 @@ defmodule ExpirableStore do
     %{fetch: fetch_fn, scope: scope, refresh: refresh} =
       ExpirableStore.Info.expirables(module) |> Enum.find(fn e -> e.name == name end)
 
-    result =
-      case scope do
-        :cluster -> ExpirableStore.Cluster.fetch(module, name, fetch_fn, refresh)
-        :local -> ExpirableStore.Local.fetch(module, name, fetch_fn, refresh)
-      end
-
+    result = ExpirableStore.Store.fetch(module, name, fetch_fn, refresh, scope)
     to_external(result)
   end
 
@@ -46,10 +41,7 @@ defmodule ExpirableStore do
     %{scope: scope} =
       ExpirableStore.Info.expirables(module) |> Enum.find(fn e -> e.name == name end)
 
-    case scope do
-      :cluster -> ExpirableStore.Cluster.clear(module, name)
-      :local -> ExpirableStore.Local.clear(module, name)
-    end
+    ExpirableStore.Store.clear(module, name, scope)
   end
 
   @doc """

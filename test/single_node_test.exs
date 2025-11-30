@@ -48,7 +48,7 @@ defmodule ExpirableStore.SingleNodeTest do
     end
 
     test "agents are added to :pg groups" do
-      group = {TestExpirables, :cluster_lazy}
+      group = {:cluster, TestExpirables, :cluster_lazy}
       assert length(:pg.get_members(:expirable_store, group)) == 0
 
       {:ok, _, _} = TestExpirables.fetch(:cluster_lazy)
@@ -90,7 +90,7 @@ defmodule ExpirableStore.SingleNodeTest do
     end
 
     test "agents are added to :pg groups" do
-      group = {TestExpirables, :cluster_eager}
+      group = {:cluster, TestExpirables, :cluster_eager}
       assert length(:pg.get_members(:expirable_store, group)) == 0
 
       {:ok, _, _} = TestExpirables.fetch(:cluster_eager)
@@ -130,16 +130,12 @@ defmodule ExpirableStore.SingleNodeTest do
       assert token3 != token1
     end
 
-    test "does not use pg groups" do
-      {:ok, _, _} = TestExpirables.fetch(:local_lazy)
-      assert length(:pg.get_members(:expirable_store, {TestExpirables, :local_lazy})) == 0
-    end
+    test "uses :pg groups with node-scoped key" do
+      group = {:local, node(), TestExpirables, :local_lazy}
+      assert length(:pg.get_members(:expirable_store, group)) == 0
 
-    test "uses Registry instead" do
       {:ok, _, _} = TestExpirables.fetch(:local_lazy)
-
-      assert [{_pid, _}] =
-               Registry.lookup(ExpirableStore.LocalRegistry, {TestExpirables, :local_lazy})
+      assert length(:pg.get_members(:expirable_store, group)) == 1
     end
 
     test "clear removes value" do
@@ -167,9 +163,12 @@ defmodule ExpirableStore.SingleNodeTest do
       assert token2 != token1
     end
 
-    test "does not use pg groups" do
+    test "uses :pg groups with node-scoped key" do
+      group = {:local, node(), TestExpirables, :local_eager}
+      assert length(:pg.get_members(:expirable_store, group)) == 0
+
       {:ok, _, _} = TestExpirables.fetch(:local_eager)
-      assert length(:pg.get_members(:expirable_store, {TestExpirables, :local_eager})) == 0
+      assert length(:pg.get_members(:expirable_store, group)) == 1
     end
 
     test "clear causes fresh fetch on next call" do

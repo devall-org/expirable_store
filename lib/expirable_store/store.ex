@@ -1,24 +1,24 @@
-defmodule ExpirableStore.Cluster do
+defmodule ExpirableStore.Store do
   @moduledoc false
 
   # ===========================================================================
   # Public API
   # ===========================================================================
 
-  def fetch(module, name, fetch_fn, refresh) do
-    group = {module, name}
+  def fetch(module, name, fetch_fn, refresh, scope) do
+    group = make_group(scope, module, name)
     local_pid = get_local_agent(group)
 
     if is_nil(local_pid) or not Process.alive?(local_pid) do
-      acquire_lock_and_fetch(group, fetch_fn, refresh)
+      acquire_lock_and_fetch(group, fetch_fn, refresh, scope)
     else
       case Agent.get(local_pid, & &1) do
         :__error__ ->
-          acquire_lock_and_fetch(group, fetch_fn, refresh)
+          acquire_lock_and_fetch(group, fetch_fn, refresh, scope)
 
         {:__ready__, _, expires_at} = entry ->
           if expired?(expires_at) do
-            acquire_lock_and_fetch(group, fetch_fn, refresh)
+            acquire_lock_and_fetch(group, fetch_fn, refresh, scope)
           else
             entry
           end
@@ -26,10 +26,10 @@ defmodule ExpirableStore.Cluster do
     end
   end
 
-  def clear(module, name) do
-    group = {module, name}
+  def clear(module, name, scope) do
+    group = make_group(scope, module, name)
 
-    :global.trans({group, self()}, fn ->
+    global_trans(group, scope, fn ->
       group
       |> get_all_agents()
       |> Enum.each(fn pid ->
@@ -49,26 +49,37 @@ defmodule ExpirableStore.Cluster do
   # Private implementation
   # ===========================================================================
 
-  defp acquire_lock_and_fetch(group, fetch_fn, refresh) do
-    :global.trans({group, self()}, fn ->
+  defp make_group(:cluster, module, name), do: {:cluster, module, name}
+  defp make_group(:local, module, name), do: {:local, node(), module, name}
+
+  defp global_trans(group, :cluster, fun) do
+    :global.trans({group, self()}, fun)
+  end
+
+  defp global_trans(group, :local, fun) do
+    :global.trans({group, self()}, fun, [node()])
+  end
+
+  defp acquire_lock_and_fetch(group, fetch_fn, refresh, scope) do
+    global_trans(group, scope, fn ->
       local_pid = get_local_agent(group)
 
       if is_nil(local_pid) or not Process.alive?(local_pid) do
-        new_pid = create_agent(group, fetch_fn, refresh)
+        new_pid = create_agent(group, fetch_fn, refresh, scope)
         Agent.get(new_pid, & &1)
       else
         case Agent.get(local_pid, & &1) do
           :__error__ ->
             new_entry = to_internal(fetch_fn.())
             update_all_members(group, new_entry)
-            schedule_eager_refresh(group, new_entry, fetch_fn, refresh)
+            schedule_eager_refresh(group, new_entry, fetch_fn, refresh, scope)
             new_entry
 
           {:__ready__, _, expires_at} = entry ->
             if expired?(expires_at) do
               new_entry = to_internal(fetch_fn.())
               update_all_members(group, new_entry)
-              schedule_eager_refresh(group, new_entry, fetch_fn, refresh)
+              schedule_eager_refresh(group, new_entry, fetch_fn, refresh, scope)
               new_entry
             else
               entry
@@ -112,7 +123,7 @@ defmodule ExpirableStore.Cluster do
     end)
   end
 
-  defp create_agent(group, fetch_fn, refresh) do
+  defp create_agent(group, fetch_fn, refresh, scope) do
     initial_value =
       case get_value_from_cluster(group) do
         {:__ready__, _, _} = entry -> entry
@@ -120,7 +131,7 @@ defmodule ExpirableStore.Cluster do
       end
 
     spec = %{
-      id: {:cluster, group},
+      id: {scope, group},
       start: {Agent, :start_link, [fn -> initial_value end]},
       restart: :temporary
     }
@@ -128,7 +139,7 @@ defmodule ExpirableStore.Cluster do
     {:ok, pid} = DynamicSupervisor.start_child(ExpirableStore.Supervisor, spec)
     :ok = :pg.join(:expirable_store, group, pid)
 
-    schedule_eager_refresh(group, initial_value, fetch_fn, refresh)
+    schedule_eager_refresh(group, initial_value, fetch_fn, refresh, scope)
 
     pid
   end
@@ -149,10 +160,10 @@ defmodule ExpirableStore.Cluster do
   # Eager refresh scheduling
   # ===========================================================================
 
-  defp schedule_eager_refresh(_group, :__error__, _fetch_fn, _refresh), do: :ok
-  defp schedule_eager_refresh(_group, _entry, _fetch_fn, :lazy), do: :ok
+  defp schedule_eager_refresh(_group, :__error__, _fetch_fn, _refresh, _scope), do: :ok
+  defp schedule_eager_refresh(_group, _entry, _fetch_fn, :lazy, _scope), do: :ok
 
-  defp schedule_eager_refresh(group, {:__ready__, _value, expires_at}, fetch_fn, :eager) do
+  defp schedule_eager_refresh(group, {:__ready__, _value, expires_at}, fetch_fn, :eager, scope) do
     now = System.system_time(:millisecond)
     ttl = expires_at - now
 
@@ -162,7 +173,7 @@ defmodule ExpirableStore.Cluster do
       if refresh_delay > 0 do
         spawn(fn ->
           Process.sleep(refresh_delay)
-          do_eager_refresh(group, fetch_fn)
+          do_eager_refresh(group, fetch_fn, scope)
         end)
       end
     end
@@ -170,8 +181,8 @@ defmodule ExpirableStore.Cluster do
     :ok
   end
 
-  defp do_eager_refresh(group, fetch_fn) do
-    :global.trans({group, self()}, fn ->
+  defp do_eager_refresh(group, fetch_fn, scope) do
+    global_trans(group, scope, fn ->
       local_pid = get_local_agent(group)
 
       if is_nil(local_pid) or not Process.alive?(local_pid) do
@@ -179,7 +190,7 @@ defmodule ExpirableStore.Cluster do
       else
         new_entry = to_internal(fetch_fn.())
         update_all_members(group, new_entry)
-        schedule_eager_refresh(group, new_entry, fetch_fn, :eager)
+        schedule_eager_refresh(group, new_entry, fetch_fn, :eager, scope)
       end
     end)
   end
@@ -195,3 +206,4 @@ defmodule ExpirableStore.Cluster do
   defp to_internal({:ok, value, expires_at}), do: {:__ready__, value, expires_at}
   defp to_internal(:error), do: :__error__
 end
+

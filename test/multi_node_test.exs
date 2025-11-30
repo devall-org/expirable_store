@@ -46,7 +46,7 @@ defmodule ExpirableStore.MultiNodeTest do
     end
 
     test "each node has local replica via :pg", %{node2: node2} do
-      group = {TestExpirables, :cluster_lazy}
+      group = {:cluster, TestExpirables, :cluster_lazy}
 
       assert length(:pg.get_local_members(:expirable_store, group)) == 0
       assert length(:erpc.call(node2, :pg, :get_local_members, [:expirable_store, group])) == 0
@@ -156,11 +156,15 @@ defmodule ExpirableStore.MultiNodeTest do
       assert token2a == token2b
     end
 
-    test "does not use :pg groups", %{node2: node2} do
+    test "uses :pg groups with node-scoped key", %{node2: node2} do
       {:ok, _, _} = :erpc.call(node2, TestExpirables, :fetch, [:local_lazy])
       {:ok, _, _} = TestExpirables.fetch(:local_lazy)
 
-      assert length(:pg.get_members(:expirable_store, {TestExpirables, :local_lazy})) == 0
+      # Each node has its own group
+      group1 = {:local, node(), TestExpirables, :local_lazy}
+      group2 = {:local, node2, TestExpirables, :local_lazy}
+      assert length(:pg.get_members(:expirable_store, group1)) == 1
+      assert length(:pg.get_members(:expirable_store, group2)) == 1
     end
 
     test "clear removes value on that node only", %{node2: node2} do
@@ -259,7 +263,7 @@ defmodule ExpirableStore.MultiNodeTest do
       assert_receive {:fetch, :cluster_lazy, _node}
 
       # Wait for pg to sync across nodes
-      group = {TestExpirables, :cluster_lazy}
+      group = {:cluster, TestExpirables, :cluster_lazy}
       wait_until(fn -> length(:pg.get_members(:expirable_store, group)) == 1 end)
 
       # Second node should get the same value without calling fetch_fn
