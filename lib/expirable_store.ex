@@ -386,16 +386,14 @@ defmodule ExpirableStore do
 
   defp do_eager_refresh_cluster(group, fetch_fn) do
     :global.trans({group, self()}, fn ->
-      case get_local_cluster_agent(group) do
-        nil ->
-          :ok
+      local_pid = get_local_cluster_agent(group)
 
-        local_pid ->
-          if Process.alive?(local_pid) do
-            new_entry = to_internal(fetch_fn.())
-            update_all_cluster_members(group, new_entry)
-            schedule_eager_refresh_cluster(group, new_entry, fetch_fn, :eager)
-          end
+      if is_nil(local_pid) or not Process.alive?(local_pid) do
+        :ok
+      else
+        new_entry = to_internal(fetch_fn.())
+        update_all_cluster_members(group, new_entry)
+        schedule_eager_refresh_cluster(group, new_entry, fetch_fn, :eager)
       end
     end)
   end
@@ -426,38 +424,36 @@ defmodule ExpirableStore do
   end
 
   defp do_eager_refresh_local(key, fetch_fn) do
-    case get_local_agent(key) do
-      nil ->
-        :ok
+    local_pid = get_local_agent(key)
 
-      pid ->
-        if Process.alive?(pid) do
-          # CAS: acquire refresh lock
-          case Agent.get_and_update(pid, fn
-                 {:__refreshing__, _} = state ->
-                   # Already refreshing - skip
-                   {:already_refreshing, state}
+    if is_nil(local_pid) or not Process.alive?(local_pid) do
+      :ok
+    else
+      # CAS: acquire refresh lock
+      case Agent.get_and_update(local_pid, fn
+             {:__refreshing__, _} = state ->
+               # Already refreshing - skip
+               {:already_refreshing, state}
 
-                 {:__fetching__, _} = state ->
-                   # Initial fetch in progress - skip
-                   {:fetching, state}
+             {:__fetching__, _} = state ->
+               # Initial fetch in progress - skip
+               {:fetching, state}
 
-                 entry ->
-                   # Start refresh
-                   {:do_refresh, {:__refreshing__, entry}}
-               end) do
-            :do_refresh ->
-              new_entry = to_internal(fetch_fn.())
-              Agent.update(pid, fn {:__refreshing__, _} -> new_entry end)
-              schedule_eager_refresh_local(key, new_entry, fetch_fn, :eager)
+             entry ->
+               # Start refresh
+               {:do_refresh, {:__refreshing__, entry}}
+           end) do
+        :do_refresh ->
+          new_entry = to_internal(fetch_fn.())
+          Agent.update(local_pid, fn {:__refreshing__, _} -> new_entry end)
+          schedule_eager_refresh_local(key, new_entry, fetch_fn, :eager)
 
-            :already_refreshing ->
-              :ok
+        :already_refreshing ->
+          :ok
 
-            :fetching ->
-              :ok
-          end
-        end
+        :fetching ->
+          :ok
+      end
     end
   end
 
