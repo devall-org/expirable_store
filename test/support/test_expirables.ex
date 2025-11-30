@@ -55,7 +55,7 @@ defmodule TestExpirables do
       {:ok, token, expires_at}
     end
 
-    refresh :eager
+    refresh {:eager, before_expiry: 20}
     scope :cluster
   end
 
@@ -97,7 +97,7 @@ defmodule TestExpirables do
       {:ok, token, expires_at}
     end
 
-    refresh :eager
+    refresh {:eager, before_expiry: 20}
     scope :local
   end
 end

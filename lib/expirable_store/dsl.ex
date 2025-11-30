@@ -20,11 +20,15 @@ defmodule ExpirableStore.Dsl do
         doc: "Function that returns {:ok, value, expires_at} or :error"
       ],
       refresh: [
-        type: {:one_of, [:lazy, :eager]},
+        type:
+          {:or,
+           [
+             {:literal, :lazy},
+             {:tuple, [{:literal, :eager}, :keyword_list]}
+           ]},
         required: false,
         default: :lazy,
-        doc:
-          ":lazy (refresh on next fetch after expiry) or :eager (background refresh before expiry)"
+        doc: ":lazy or {:eager, before_expiry: milliseconds}"
       ],
       scope: [
         type: {:one_of, [:cluster, :local]},

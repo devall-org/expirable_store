@@ -163,25 +163,23 @@ defmodule ExpirableStore.Store do
   defp schedule_eager_refresh(_group, :error, _fetch_fn, _refresh, _scope), do: :ok
   defp schedule_eager_refresh(_group, _entry, _fetch_fn, :lazy, _scope), do: :ok
 
-  defp schedule_eager_refresh(group, {:ok, _value, expires_at}, fetch_fn, :eager, scope) do
+  defp schedule_eager_refresh(group, {:ok, _value, expires_at}, fetch_fn, {:eager, opts}, scope) do
+    before_ms = Keyword.fetch!(opts, :before_expiry)
     now = System.system_time(:millisecond)
-    ttl = expires_at - now
+    refresh_at = expires_at - before_ms
+    delay = refresh_at - now
 
-    if ttl > 0 do
-      refresh_delay = trunc(ttl * 0.9)
-
-      if refresh_delay > 0 do
-        spawn(fn ->
-          Process.sleep(refresh_delay)
-          do_eager_refresh(group, fetch_fn, scope)
-        end)
-      end
+    if delay > 0 do
+      spawn(fn ->
+        Process.sleep(delay)
+        do_eager_refresh(group, fetch_fn, {:eager, opts}, scope)
+      end)
     end
 
     :ok
   end
 
-  defp do_eager_refresh(group, fetch_fn, scope) do
+  defp do_eager_refresh(group, fetch_fn, refresh, scope) do
     global_trans(group, scope, fn ->
       local_pid = get_local_agent(group)
 
@@ -190,7 +188,7 @@ defmodule ExpirableStore.Store do
       else
         new_entry = fetch_fn.()
         update_all_members(group, new_entry)
-        schedule_eager_refresh(group, new_entry, fetch_fn, :eager, scope)
+        schedule_eager_refresh(group, new_entry, fetch_fn, refresh, scope)
       end
     end)
   end

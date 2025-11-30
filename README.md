@@ -27,22 +27,26 @@ end
 defmodule MyApp.Expirables do
   use ExpirableStore
 
-  # Cluster-scoped, lazy refresh (default)
+  # Cluster-scoped, lazy refresh
   expirable :github_access_token do
     # Must return {:ok, value, expires_at} or :error
     fetch fn -> GitHubOAuth.fetch_access_token() end
+    scope :cluster
+    refresh :lazy
   end
 
-  # Local-scoped (node-independent)
+  # Local-scoped, lazy refresh
   expirable :datadog_agent_token do
     fetch fn -> DatadogAgent.fetch_local_token() end
     scope :local
+    refresh :lazy
   end
 
-  # Eager refresh (background pre-refresh before expiry)
+  # Cluster-scoped, eager refresh (30 seconds before expiry)
   expirable :fx_rate_usd_krw do
     fetch fn -> FX.fetch_usd_krw() end
-    refresh :eager
+    scope :cluster
+    refresh {:eager, before_expiry: :timer.seconds(30)}
   end
 end
 ```
@@ -72,13 +76,13 @@ Define an expirable value with the following options:
 | Option | Values | Default | Description |
 |--------|--------|---------|-------------|
 | `fetch` | `fn -> {:ok, value, expires_at} \| :error end` | *required* | Function to fetch the value |
-| `refresh` | `:lazy`, `:eager` | `:lazy` | Refresh strategy |
+| `refresh` | `:lazy`, `{:eager, before_expiry: ms}` | `:lazy` | Refresh strategy |
 | `scope` | `:cluster`, `:local` | `:cluster` | Scope of the store |
 
 ### Refresh Strategies
 
 - **`:lazy`** (default): Refresh on next fetch after expiry
-- **`:eager`**: Background refresh at 90% of TTL (before expiry)
+- **`{:eager, before_expiry: ms}`**: Background refresh `ms` milliseconds before expiry
 
 ### Scope Options
 
@@ -123,8 +127,8 @@ expirable :name do
     {:ok, value, System.system_time(:millisecond) + ttl_ms}
   end
 
-  refresh :lazy    # or :eager
   scope :cluster   # or :local
+  refresh :lazy    # or {:eager, before_expiry: ms}
 end
 ```
 
