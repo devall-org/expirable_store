@@ -6,10 +6,10 @@ Perfect for caching OAuth tokens, API keys, and other time-sensitive data that s
 
 ## Features
 
-- **Smart storage**: Stores successes, retries failures on next fetch
+- **Smart caching**: Caches successful results, retries on failure
 - **Flexible scoping**: Cluster-wide replication or node-local storage
 - **Refresh strategies**: Lazy (on-demand) or eager (background pre-refresh)
-- **Concurrency-safe**: Safe concurrent access via `:global.trans/2`
+- **Concurrency-safe**: Concurrent access protected by `:global.trans/2`
 - **Clean DSL**: [Spark](https://github.com/ash-project/spark)-based compile-time configuration
 - **Named functions**: Auto-generated functions for each expirable (e.g., `github()`, `github!()`)
 
@@ -95,8 +95,8 @@ Define an expirable value with the following options:
 
 ### Local Scope (`:local`)
 
-- **Node-independent**: Each node maintains its own Agent via Registry
-- **No coordination**: No cluster-wide locking or synchronization
+- **Node-independent**: Each node maintains its own Agent via `:pg` with node-scoped group
+- **Local locking**: Uses `:global.trans/2` with `[node()]` for node-local coordination
 - **Use case**: Per-node secrets, local agent tokens, etc.
 
 ## When to Use
