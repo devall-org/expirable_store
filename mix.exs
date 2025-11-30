@@ -1,16 +1,16 @@
-defmodule NanoGlobalCache.MixProject do
+defmodule ExpirableStore.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :nano_global_cache,
-      version: "0.3.0",
+      app: :expirable_store,
+      version: "0.1.0",
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       description:
-        "Lightweight global cache for Elixir with expiration support and intelligent failure handling",
+        "Lightweight expirable value store for Elixir with cluster-wide or local scoping",
       package: package()
     ]
   end
@@ -19,7 +19,7 @@ defmodule NanoGlobalCache.MixProject do
   def application do
     [
       extra_applications: [:logger],
-      mod: {NanoGlobalCache.Application, []}
+      mod: {ExpirableStore.Application, []}
     ]
   end
 
@@ -43,7 +43,7 @@ defmodule NanoGlobalCache.MixProject do
     [
       licenses: ["MIT"],
       links: %{
-        "GitHub" => "https://github.com/jechol/nano_global_cache"
+        "GitHub" => "https://github.com/devall-org/expirable_store"
       }
     ]
   end

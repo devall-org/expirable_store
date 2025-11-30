@@ -13,18 +13,21 @@ defmodule ClusterHelper do
       # Generate random node name to avoid conflicts
       node_name = :"test_#{:rand.uniform(999_999)}"
       {:ok, _} = :net_kernel.start([node_name, :shortnames])
-      Node.set_cookie(:test_cookie)
     end
+
+    # Get current cookie and set on peer nodes
+    cookie = Node.get_cookie()
 
     # Start peer nodes
     Enum.map(names, fn name ->
-      {:ok, pid, node} = :peer.start_link(%{name: name, args: [~c"-setcookie", ~c"test_cookie"]})
+      cookie_arg = cookie |> Atom.to_charlist()
+      {:ok, pid, node} = :peer.start_link(%{name: name, args: [~c"-setcookie", cookie_arg]})
 
       # Add code paths from current node
       :erpc.call(node, :code, :add_paths, [:code.get_path()])
 
       # Start application on peer node
-      {:ok, _apps} = :erpc.call(node, Application, :ensure_all_started, [:nano_global_cache])
+      {:ok, _apps} = :erpc.call(node, Application, :ensure_all_started, [:expirable_store])
 
       {pid, node}
     end)

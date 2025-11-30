@@ -1,61 +1,59 @@
-# NanoGlobalCache
+# ExpirableStore
 
-🔒 **Lightweight global cache for Elixir** with expiration support and intelligent failure handling.
+Lightweight expirable value store for Elixir with cluster-wide or local scoping.
 
 Perfect for caching OAuth tokens, API keys, and other time-sensitive data that shouldn't be repeatedly refreshed.
 
-## Why NanoGlobalCache?
+## Features
 
-- ✅ **Smart caching**: Caches successes, retries failures on next fetch
-- 🌍 **Read replicas**: Each node maintains local copy for fast, lock-free access
-- 🔐 **Concurrency-safe**: Safe concurrent access via `:global.trans/2`
-- ⏱️ **Expiration**: Time-based invalidation with custom logic
-- 📝 **Clean DSL**: [Spark](https://github.com/ash-project/spark)-based compile-time configuration with auto-generated functions
-- ⚡ **Minimal overhead**: No background processes or setup
+- **Smart caching**: Caches successes, retries failures on next fetch
+- **Flexible scoping**: Cluster-wide replication or node-local storage
+- **Refresh strategies**: Lazy (on-demand) or eager (background pre-refresh)
+- **Concurrency-safe**: Safe concurrent access via `:global.trans/2`
+- **Clean DSL**: [Spark](https://github.com/ash-project/spark)-based compile-time configuration
 
 ## Installation
 
 ```elixir
 def deps do
-  [{:nano_global_cache, "~> 0.3.0"}]
+  [{:expirable_store, "~> 0.1.0"}]
 end
 ```
 
 ## Quick Example
 
 ```elixir
-defmodule MyApp.TokenCache do
-  use NanoGlobalCache
+defmodule MyApp.Expirables do
+  use ExpirableStore
 
-  # Regular OAuth token - calculate expiration yourself
-  cache :github do
+  # Cluster-scoped, lazy refresh (default)
+  expirable :github_access_token do
     fetch fn ->
-      case GitHub.refresh_token() do
-        {:ok, token} ->
-          expires_at = System.system_time(:millisecond) + :timer.hours(1)
-          {:ok, token, expires_at}
-        :error ->
-          :error
-      end
+      {:ok, token, exp} = GitHubOAuth.fetch_access_token()
+      {:ok, token, exp}
     end
   end
 
-  # JWT token - use expiration time from the token itself
-  cache :auth0 do
+  # Local-scoped (node-independent)
+  expirable :datadog_agent_token do
     fetch fn ->
-      case Auth0.get_access_token() do
-        {:ok, jwt} ->
-          # JWT exp claim is in seconds, convert to milliseconds
-          %{"exp" => exp_seconds} = JOSE.JWT.peek_payload(jwt)
-          expires_at = exp_seconds * 1000
-          {:ok, jwt, expires_at}
-        :error ->
-          :error
-      end
+      {:ok, token, exp} = DatadogAgent.fetch_local_token()
+      {:ok, token, exp}
     end
+
+    scope :local
   end
 
-  # Generated functions: fetch/1, fetch!/1, clear/1, clear_all/0
+  # Eager refresh (background pre-refresh before expiry)
+  expirable :fx_rate_usd_krw do
+    fetch fn ->
+      {:ok, rate, exp} = FX.fetch_usd_krw()
+      {:ok, rate, exp}
+    end
+
+    refresh :eager
+    scope :cluster
+  end
 end
 ```
 
@@ -63,91 +61,103 @@ end
 
 ```elixir
 # Pattern match on result with expiration time
-{:ok, token, expires_at} = MyApp.TokenCache.fetch(:github)
+{:ok, token, expires_at} = MyApp.Expirables.fetch(:github_access_token)
 
-# Or use bang version (no expiration time)
-token = MyApp.TokenCache.fetch!(:github)
+# Or use bang version (returns value directly, raises on error)
+token = MyApp.Expirables.fetch!(:github_access_token)
 
 # Clear cache
-MyApp.TokenCache.clear(:github)
-MyApp.TokenCache.clear_all()
+MyApp.Expirables.clear(:github_access_token)
+MyApp.Expirables.clear_all()
 ```
+
+## DSL Options
+
+### `expirable`
+
+Define an expirable value with the following options:
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `fetch` | `fn -> {:ok, value, expires_at} \| :error end` | *required* | Function to fetch the value |
+| `refresh` | `:lazy`, `:eager` | `:lazy` | Refresh strategy |
+| `scope` | `:cluster`, `:local` | `:cluster` | Scope of the cache |
+
+### Refresh Strategies
+
+- **`:lazy`** (default): Refresh on next fetch after expiry
+- **`:eager`**: Background refresh at 90% of TTL (before expiry)
+
+### Scope Options
+
+- **`:cluster`** (default): Replicated across all nodes via `:pg`
+- **`:local`**: Node-local only, no replication
 
 ## How It Works
 
-### Read Replicas for Performance
+### Cluster Scope (`:cluster`)
 
-NanoGlobalCache uses a **read replica pattern** to eliminate network latency:
+- **Read replicas**: Each node maintains a local Agent copy for lock-free reads
+- **Coordination**: Updates coordinated via `:global.trans/2` to prevent race conditions
+- **Replication**: Uses `:pg` for agent group membership across cluster
 
-- **Each node maintains a local Agent** with its own copy of the cached data
-- Reads are served from the local replica (no network hop, no lock)
-- First access on a node creates a local replica by copying from existing nodes or fetching fresh
+### Local Scope (`:local`)
 
-### Consistency Model
-
-- **Expiration checks**: Each node independently checks expiration (eventually consistent)
-- **Updates**: Coordinated via `:global.trans/2` to prevent race conditions
-- **Double-check pattern**: Lock winner verifies expiration again before fetching
-- **Replica sync**: All replicas updated atomically within the lock
-- **Failed results**: Never cached, always retried on next call
+- **Node-independent**: Each node maintains its own ETS-backed cache
+- **No coordination**: No cluster-wide locking or synchronization
+- **Use case**: Per-node secrets, local agent tokens, etc.
 
 ## When to Use
 
 This library is optimized for **lightweight data** like:
 - OAuth tokens, API keys, JWT tokens
-- Small configuration values
-- Session identifiers
-- Cached credentials
+- FX rates, configuration values
+- Session identifiers, cached credentials
 
 **NOT recommended for**:
 - High-traffic scenarios (frequent reads/writes)
 - Dynamic cache keys (unbounded number of entries)
-- Large cache values that would cause heavy network traffic between nodes
+- Large cache values
 
-NanoGlobalCache uses `:pg` for replication and `:global.trans/2` for coordination. All nodes maintain local replicas for fast access, eliminating network latency for reads. Updates are coordinated globally to keep replicas consistent. Designed for scenarios where simplicity and predictable local access are valued.
-
-**For more demanding use cases**, consider [Cachex](https://github.com/whitfin/cachex) or [Nebulex](https://github.com/cabol/nebulex).
+For more demanding use cases, consider [Cachex](https://github.com/whitfin/cachex) or [Nebulex](https://github.com/cabol/nebulex).
 
 ## API Reference
 
-### Define Caches
+### Define Expirables
+
 ```elixir
-cache :cache_name do
+expirable :name do
   fetch fn ->
-    # Your fetch logic here
     # Must return {:ok, value, expires_at} or :error
     # expires_at is Unix timestamp in milliseconds
-    {:ok, value, System.system_time(:millisecond) + ttl_milliseconds}
+    {:ok, value, System.system_time(:millisecond) + ttl_ms}
   end
+
+  refresh :lazy    # or :eager
+  scope :cluster   # or :local
 end
 ```
 
 ### Generated Functions
+
 - `fetch(name)` → `{:ok, value, expires_at}` or `:error`
-- `fetch!(name)` → `value` (without expiration time) or raises `RuntimeError`
+- `fetch!(name)` → `value` or raises `RuntimeError`
 - `clear(name)` → `:ok`
 - `clear_all()` → `:ok`
-
-## Implementation
-
-- [Spark](https://github.com/ash-project/spark) DSL for compile-time configuration
-- `:pg` for agent replication across cluster
-- `:global.trans/2` for distributed coordination
-- Automatic function generation via transformers
 
 ## Development
 
 ### Running Tests
 
 ```bash
-# Run all tests (includes distributed tests)
-mix test
+# Run all tests (includes cluster tests)
+elixir --sname test -S mix test
 
-# Run only distributed tests
-mix test --only distributed
+# Run only local tests (no cluster)
+mix test --exclude cluster
 
-# Exclude distributed tests
-mix test --exclude distributed
+# Run only cluster tests
+elixir --sname test -S mix test --only cluster
 ```
 
-Distributed tests automatically start a local Erlang cluster using `:net_kernel` and `:peer` to verify cache replication and synchronization across multiple nodes.
+Cluster tests automatically start a local Erlang cluster using `:peer` to verify replication and synchronization across multiple nodes.
