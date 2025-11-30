@@ -31,7 +31,7 @@ defmodule ExpirableStore.SingleNodeTest do
       assert token1 == token2
       assert expires_at1 == expires_at2
 
-      Process.sleep(300)
+      Process.sleep(105)
 
       {:ok, token3, expires_at3} = TestExpirables.fetch(:cluster_lazy)
       assert_receive {:fetch, :cluster_lazy, _}
@@ -80,11 +80,10 @@ defmodule ExpirableStore.SingleNodeTest do
       assert_receive {:fetch, :cluster_eager, _}
 
       # Wait for eager refresh (should happen at ~90ms, before 100ms expiry)
-      Process.sleep(120)
+      Process.sleep(95)
 
       # Eager refresh should have happened in background
-      assert_receive {:fetch, :cluster_eager, _}, 50
-
+      assert_receive {:fetch, :cluster_eager, _}
       # Value should still be valid (refreshed)
       {:ok, token2, _} = TestExpirables.fetch(:cluster_eager)
       assert token2 != token1
@@ -124,7 +123,7 @@ defmodule ExpirableStore.SingleNodeTest do
       assert token1 == token2
       assert expires_at1 == expires_at2
 
-      Process.sleep(300)
+      Process.sleep(105)
 
       {:ok, token3, _} = TestExpirables.fetch(:local_lazy)
       assert_receive {:fetch, :local_lazy, _}
@@ -160,10 +159,10 @@ defmodule ExpirableStore.SingleNodeTest do
       {:ok, token1, _} = TestExpirables.fetch(:local_eager)
       assert_receive {:fetch, :local_eager, _}
 
-      Process.sleep(120)
+      # Wait for eager refresh (should happen at ~90ms)
+      Process.sleep(95)
 
-      assert_receive {:fetch, :local_eager, _}, 50
-
+      assert_receive {:fetch, :local_eager, _}
       {:ok, token2, _} = TestExpirables.fetch(:local_eager)
       assert token2 != token1
     end

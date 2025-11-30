@@ -162,7 +162,6 @@ defmodule ExpirableStore do
   defp create_cluster_agent(group, fetch_fn, refresh) do
     initial_value = get_value_from_cluster(group) || fetch_fn.()
 
-
     spec = %{
       id: {:cluster, group},
       start: {Agent, :start_link, [fn -> initial_value end]},

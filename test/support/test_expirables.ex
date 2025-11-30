@@ -14,7 +14,7 @@ defmodule TestExpirables do
       end
 
       token = "cluster_lazy_#{:rand.uniform(10000)}"
-      expires_at = System.system_time(:millisecond) + 200
+      expires_at = System.system_time(:millisecond) + 100
       {:ok, token, expires_at}
     end
 
@@ -68,7 +68,7 @@ defmodule TestExpirables do
       end
 
       token = "local_lazy_#{:rand.uniform(10000)}_#{node()}"
-      expires_at = System.system_time(:millisecond) + 200
+      expires_at = System.system_time(:millisecond) + 100
       {:ok, token, expires_at}
     end
 

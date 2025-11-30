@@ -30,7 +30,7 @@ defmodule ExpirableStore.MultiNodeTest do
 
     test "updates are synchronized across nodes", %{node2: node2} do
       {:ok, token1, _} = TestExpirables.fetch(:cluster_lazy)
-      Process.sleep(250)
+      Process.sleep(105)
 
       {:ok, token2, _} = TestExpirables.fetch(:cluster_lazy)
       assert token2 != token1
@@ -59,9 +59,8 @@ defmodule ExpirableStore.MultiNodeTest do
 
     test "concurrent updates are safe", %{node2: node2} do
       {:ok, _, _} = TestExpirables.fetch(:cluster_lazy)
-      assert_receive {:fetch, :cluster_lazy, _}, 100
-
-      Process.sleep(250)
+      assert_receive {:fetch, :cluster_lazy, _}
+      Process.sleep(105)
 
       task1 = Task.async(fn -> :erpc.call(node2, TestExpirables, :fetch, [:cluster_lazy]) end)
       task2 = Task.async(fn -> TestExpirables.fetch(:cluster_lazy) end)
@@ -72,8 +71,8 @@ defmodule ExpirableStore.MultiNodeTest do
       assert token1 == token2
 
       # Only one fetch should have been called (from either node)
-      assert_receive {:fetch, :cluster_lazy, _}, 100
-      refute_receive {:fetch, :cluster_lazy, _}, 100
+      assert_receive {:fetch, :cluster_lazy, _}
+      refute_receive {:fetch, :cluster_lazy, _}
     end
   end
 
@@ -95,10 +94,9 @@ defmodule ExpirableStore.MultiNodeTest do
       # Create replica on node2
       {:ok, _, _} = :erpc.call(node2, TestExpirables, :fetch, [:cluster_eager])
 
-      # Wait for eager refresh
-      Process.sleep(120)
-      assert_receive {:fetch, :cluster_eager, _}, 50
-
+      # Wait for eager refresh (should happen at ~90ms)
+      Process.sleep(95)
+      assert_receive {:fetch, :cluster_eager, _}
       # Both nodes should have the new token
       {:ok, token2, _} = TestExpirables.fetch(:cluster_eager)
       {:ok, token3, _} = :erpc.call(node2, TestExpirables, :fetch, [:cluster_eager])
@@ -157,10 +155,9 @@ defmodule ExpirableStore.MultiNodeTest do
       {:ok, token1, _} = TestExpirables.fetch(:local_eager)
       assert_receive {:fetch, :local_eager, _}
 
-      # Wait for eager refresh on node1
-      Process.sleep(120)
-      assert_receive {:fetch, :local_eager, _}, 50
-
+      # Wait for eager refresh on node1 (should happen at ~90ms)
+      Process.sleep(95)
+      assert_receive {:fetch, :local_eager, _}
       {:ok, token2, _} = TestExpirables.fetch(:local_eager)
       assert token2 != token1
 
