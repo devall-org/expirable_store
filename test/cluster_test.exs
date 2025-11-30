@@ -20,7 +20,7 @@ defmodule ExpirableStore.ClusterTest do
   # ===========================================================================
 
   describe "scope :cluster, refresh :lazy (multi-node)" do
-    test "cache is replicated across nodes", %{node2: node2} do
+    test "value is replicated across nodes", %{node2: node2} do
       {:ok, token1, _} = TestExpirables.fetch(:github)
       {:ok, token2, _} = :erpc.call(node2, TestExpirables, :fetch, [:github])
       assert token1 == token2
@@ -83,7 +83,7 @@ defmodule ExpirableStore.ClusterTest do
   # ===========================================================================
 
   describe "scope :cluster, refresh :eager (multi-node)" do
-    test "cache is replicated across nodes", %{node2: node2} do
+    test "value is replicated across nodes", %{node2: node2} do
       {:ok, token1, _} = TestExpirables.fetch(:eager_token)
       {:ok, token2, _} = :erpc.call(node2, TestExpirables, :fetch, [:eager_token])
       assert token1 == token2
@@ -126,7 +126,7 @@ defmodule ExpirableStore.ClusterTest do
       assert String.contains?(token2, to_string(node2))
     end
 
-    test "caches independently per node", %{node2: node2} do
+    test "stores independently per node", %{node2: node2} do
       {:ok, token1a, _} = TestExpirables.fetch(:local_token)
       {:ok, token1b, _} = TestExpirables.fetch(:local_token)
       assert token1a == token1b

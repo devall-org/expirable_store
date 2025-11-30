@@ -1,5 +1,5 @@
 # Used by "mix format"
-spark_locals_without_parens = [cache: 1, cache: 2, expires_in: 1, fetch: 1]
+spark_locals_without_parens = [expirable: 1, expirable: 2, fetch: 1, refresh: 1, scope: 1]
 
 [
   inputs: ["{mix,.formatter}.exs", "{config,lib,test}/**/*.{ex,exs}"],

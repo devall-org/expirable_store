@@ -1,73 +1,75 @@
-# NanoGlobalCache Usage Rules
+# ExpirableStore Usage Rules
 
-Lightweight global cache for Elixir with expiration support. Uses Spark DSL for compile-time cache definition.
+Lightweight expirable value store for Elixir with cluster-wide or local scoping. Uses Spark DSL for compile-time definition.
 
-## Defining Caches
+## Defining Expirables
 
 ```elixir
-defmodule MyApp.TokenCache do
-  use NanoGlobalCache
+defmodule MyApp.Expirables do
+  use ExpirableStore
 
-  cache :github do
-    fetch fn ->
-      case GitHub.refresh_token() do
-        {:ok, token} ->
-          expires_at = System.system_time(:millisecond) + :timer.hours(1)
-          {:ok, token, expires_at}
-        :error ->
-          :error
-      end
-    end
+  expirable :github_access_token do
+    # Must return {:ok, value, expires_at} or :error
+    fetch fn -> GitHubOAuth.fetch_access_token() end
+  end
+
+  expirable :local_agent_token do
+    fetch fn -> Agent.fetch_local_token() end
+    scope :local
+  end
+
+  expirable :fx_rate do
+    fetch fn -> FX.fetch_usd_krw() end
+    refresh :eager
   end
 end
 ```
 
-## Generated Functions
-
-The DSL automatically generates these functions:
+## API Usage
 
 ```elixir
-MyApp.TokenCache.fetch(:github)      # Returns {:ok, value, expires_at} or :error
-MyApp.TokenCache.fetch!(:github)     # Returns value or raises
-MyApp.TokenCache.clear(:github)      # Clears specific cache
-MyApp.TokenCache.clear_all()         # Clears all caches
+# Named functions (recommended)
+MyApp.Expirables.github_access_token()   # Returns {:ok, value, expires_at} or :error
+MyApp.Expirables.github_access_token!()  # Returns value or raises
+
+# Generic functions
+MyApp.Expirables.fetch(:github_access_token)
+MyApp.Expirables.fetch!(:github_access_token)
+MyApp.Expirables.clear(:github_access_token)
+MyApp.Expirables.clear_all()
 ```
 
-## Critical Rules
+## DSL Options
 
-### Fetch Function Return Value
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `fetch` | `fn -> {:ok, value, expires_at} \| :error end` | *required* | Function to fetch the value |
+| `refresh` | `:lazy`, `:eager` | `:lazy` | Refresh strategy |
+| `scope` | `:cluster`, `:local` | `:cluster` | Scope of the store |
 
-**MUST return exactly one of:**
-- `{:ok, value, expires_at}` where `expires_at` is Unix timestamp in **milliseconds**
-- `:error`
+### Refresh Strategies
+- `:lazy` - Refresh on next fetch after expiry
+- `:eager` - Background refresh at 90% of TTL
 
-**Common mistakes to avoid:**
-- Do NOT return `{:ok, value}` without expiration time
-- Do NOT return `{:error, reason}` - use `:error` atom only
-- Do NOT use seconds for expiration - must be milliseconds
+### Scope Options
+- `:cluster` - Replicated across all nodes via `:pg`
+- `:local` - Node-local only, no replication
 
-```elixir
-# CORRECT
-expires_at = System.system_time(:millisecond) + :timer.hours(1)
-{:ok, token, expires_at}
+## Key Behaviors
 
-# CORRECT - Converting JWT exp (seconds) to milliseconds
-expires_at = jwt_exp_seconds * 1000
-{:ok, token, expires_at}
+- Success results (`{:ok, value, expires_at}`) are stored until expiration
+- Failure results (`:error`) are NEVER stored - fetch function is called on every attempt
+- `expires_at` must be Unix timestamp in milliseconds
+- Expirable names must be compile-time atoms defined in DSL, no dynamic keys
 
-# WRONG - Using seconds
-expires_at = System.system_time(:second) + 3600
+## When to Use
 
-# WRONG - Missing expiration
-{:ok, token}
+Good for:
+- OAuth tokens, API keys, JWT tokens
+- FX rates, configuration values
+- Session identifiers, credentials
 
-# WRONG - Detailed error tuple
-{:error, "Token expired"}
-```
-
-### Caching Behavior
-
-- Success results (`{:ok, value, expires_at}`) are cached until expiration
-- Failure results (`:error`) are NEVER cached - fetch function is called on every attempt
-- After expiration, fetch function is automatically called again
-- Cache names must be compile-time atoms defined in DSL, no dynamic cache keys
+Not recommended for:
+- High-traffic scenarios
+- Dynamic keys (unbounded entries)
+- Large values

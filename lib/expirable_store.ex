@@ -9,7 +9,7 @@ defmodule ExpirableStore do
   use Spark.Dsl, default_extensions: [extensions: [ExpirableStore.Dsl]]
 
   @doc """
-  Fetch a cached value, returning `{:ok, value, expires_at}` on success or `:error` on failure.
+  Fetch a stored value, returning `{:ok, value, expires_at}` on success or `:error` on failure.
 
   The fetch function must return `{:ok, value, expires_at}` where `expires_at` is a Unix
   timestamp in milliseconds, or `:error`.
@@ -25,9 +25,9 @@ defmodule ExpirableStore do
   end
 
   @doc """
-  Fetch a cached value, raising an exception on failure.
+  Fetch a stored value, raising an exception on failure.
 
-  Returns the cached value directly without expiration time.
+  Returns the value directly without expiration time.
   """
   def fetch!(module, name) do
     case fetch(module, name) do

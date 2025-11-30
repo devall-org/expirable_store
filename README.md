@@ -6,11 +6,12 @@ Perfect for caching OAuth tokens, API keys, and other time-sensitive data that s
 
 ## Features
 
-- **Smart caching**: Caches successes, retries failures on next fetch
+- **Smart storage**: Stores successes, retries failures on next fetch
 - **Flexible scoping**: Cluster-wide replication or node-local storage
 - **Refresh strategies**: Lazy (on-demand) or eager (background pre-refresh)
 - **Concurrency-safe**: Safe concurrent access via `:global.trans/2`
 - **Clean DSL**: [Spark](https://github.com/ash-project/spark)-based compile-time configuration
+- **Named functions**: Auto-generated functions for each expirable (e.g., `github()`, `github!()`)
 
 ## Installation
 
@@ -28,31 +29,20 @@ defmodule MyApp.Expirables do
 
   # Cluster-scoped, lazy refresh (default)
   expirable :github_access_token do
-    fetch fn ->
-      {:ok, token, exp} = GitHubOAuth.fetch_access_token()
-      {:ok, token, exp}
-    end
+    # Must return {:ok, value, expires_at} or :error
+    fetch fn -> GitHubOAuth.fetch_access_token() end
   end
 
   # Local-scoped (node-independent)
   expirable :datadog_agent_token do
-    fetch fn ->
-      {:ok, token, exp} = DatadogAgent.fetch_local_token()
-      {:ok, token, exp}
-    end
-
+    fetch fn -> DatadogAgent.fetch_local_token() end
     scope :local
   end
 
   # Eager refresh (background pre-refresh before expiry)
   expirable :fx_rate_usd_krw do
-    fetch fn ->
-      {:ok, rate, exp} = FX.fetch_usd_krw()
-      {:ok, rate, exp}
-    end
-
+    fetch fn -> FX.fetch_usd_krw() end
     refresh :eager
-    scope :cluster
   end
 end
 ```
@@ -60,13 +50,15 @@ end
 ### Usage
 
 ```elixir
-# Pattern match on result with expiration time
-{:ok, token, expires_at} = MyApp.Expirables.fetch(:github_access_token)
+# Using named functions (recommended)
+{:ok, token, expires_at} = MyApp.Expirables.github_access_token()
+token = MyApp.Expirables.github_access_token!()
 
-# Or use bang version (returns value directly, raises on error)
+# Or using fetch with name
+{:ok, token, expires_at} = MyApp.Expirables.fetch(:github_access_token)
 token = MyApp.Expirables.fetch!(:github_access_token)
 
-# Clear cache
+# Clear stored value
 MyApp.Expirables.clear(:github_access_token)
 MyApp.Expirables.clear_all()
 ```
@@ -81,7 +73,7 @@ Define an expirable value with the following options:
 |--------|--------|---------|-------------|
 | `fetch` | `fn -> {:ok, value, expires_at} \| :error end` | *required* | Function to fetch the value |
 | `refresh` | `:lazy`, `:eager` | `:lazy` | Refresh strategy |
-| `scope` | `:cluster`, `:local` | `:cluster` | Scope of the cache |
+| `scope` | `:cluster`, `:local` | `:cluster` | Scope of the store |
 
 ### Refresh Strategies
 
@@ -103,7 +95,7 @@ Define an expirable value with the following options:
 
 ### Local Scope (`:local`)
 
-- **Node-independent**: Each node maintains its own ETS-backed cache
+- **Node-independent**: Each node maintains its own Agent via Registry
 - **No coordination**: No cluster-wide locking or synchronization
 - **Use case**: Per-node secrets, local agent tokens, etc.
 
@@ -112,14 +104,12 @@ Define an expirable value with the following options:
 This library is optimized for **lightweight data** like:
 - OAuth tokens, API keys, JWT tokens
 - FX rates, configuration values
-- Session identifiers, cached credentials
+- Session identifiers, credentials
 
 **NOT recommended for**:
 - High-traffic scenarios (frequent reads/writes)
-- Dynamic cache keys (unbounded number of entries)
-- Large cache values
-
-For more demanding use cases, consider [Cachex](https://github.com/whitfin/cachex) or [Nebulex](https://github.com/cabol/nebulex).
+- Dynamic keys (unbounded number of entries)
+- Large values
 
 ## API Reference
 
@@ -139,6 +129,13 @@ end
 ```
 
 ### Generated Functions
+
+For each `expirable :name`, the following functions are generated:
+
+- `name()` → `{:ok, value, expires_at}` or `:error`
+- `name!()` → `value` or raises `RuntimeError`
+
+Additionally, generic functions are available:
 
 - `fetch(name)` → `{:ok, value, expires_at}` or `:error`
 - `fetch!(name)` → `value` or raises `RuntimeError`

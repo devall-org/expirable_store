@@ -23,7 +23,7 @@ defmodule ExpirableStore.LocalTest do
   # ===========================================================================
 
   describe "scope :cluster, refresh :lazy" do
-    test "caches tokens until expiration" do
+    test "stores tokens until expiration" do
       now = System.system_time(:millisecond)
       {:ok, token1, expires_at1} = TestExpirables.fetch(:github)
       assert_receive {:fetch, :github, _}
@@ -43,7 +43,7 @@ defmodule ExpirableStore.LocalTest do
       assert expires_at3 > expires_at1
     end
 
-    test "does not cache fetch failures" do
+    test "does not store fetch failures" do
       :error = TestExpirables.fetch(:google)
       assert_receive {:fetch, :google, _}
 
@@ -62,7 +62,7 @@ defmodule ExpirableStore.LocalTest do
       assert :pg.get_members(:expirable_store, group) == []
     end
 
-    test "clear removes cache before expiration" do
+    test "clear removes value before expiration" do
       {:ok, token1, _} = TestExpirables.fetch(:github)
       {:ok, token2, _} = TestExpirables.fetch(:github)
       assert token1 == token2
@@ -119,7 +119,7 @@ defmodule ExpirableStore.LocalTest do
   # ===========================================================================
 
   describe "scope :local, refresh :lazy" do
-    test "caches tokens locally until expiration" do
+    test "stores tokens locally until expiration" do
       {:ok, token1, expires_at1} = TestExpirables.fetch(:local_token)
       assert_receive {:fetch, :local_token, _}
 
@@ -147,7 +147,7 @@ defmodule ExpirableStore.LocalTest do
                Registry.lookup(ExpirableStore.LocalRegistry, {TestExpirables, :local_token})
     end
 
-    test "clear removes cache" do
+    test "clear removes value" do
       {:ok, token1, _} = TestExpirables.fetch(:local_token)
       TestExpirables.clear(:local_token)
       {:ok, token2, _} = TestExpirables.fetch(:local_token)
@@ -242,7 +242,7 @@ defmodule ExpirableStore.LocalTest do
   end
 
   describe "clear_all/0" do
-    test "removes all caches" do
+    test "removes all values" do
       {:ok, token1, _} = TestExpirables.fetch(:github)
       {:ok, local1, _} = TestExpirables.fetch(:local_token)
       :error = TestExpirables.fetch(:google)
