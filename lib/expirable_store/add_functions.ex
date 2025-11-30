@@ -7,17 +7,28 @@ defmodule ExpirableStore.AddFunctions do
 
     # Generate named functions for each expirable
     named_functions =
-      Enum.flat_map(expirables, fn %{name: name} ->
+      Enum.flat_map(expirables, fn %{name: name, scope: scope, refresh: refresh} ->
         bang_name = String.to_atom("#{name}!")
+        refresh_str = inspect(refresh)
 
         [
           quote do
-            @doc "Fetch the `#{unquote(name)}` expirable value"
+            @doc """
+            Fetch the `#{unquote(name)}` expirable value.
+
+            - scope: `#{unquote(scope)}`
+            - refresh: `#{unquote(refresh_str)}`
+            """
             def unquote(name)() do
               ExpirableStore.fetch(__MODULE__, unquote(name))
             end
 
-            @doc "Fetch the `#{unquote(name)}` expirable value, raises on error"
+            @doc """
+            Fetch the `#{unquote(name)}` expirable value, raises on error.
+
+            - scope: `#{unquote(scope)}`
+            - refresh: `#{unquote(refresh_str)}`
+            """
             def unquote(bang_name)() do
               ExpirableStore.fetch!(__MODULE__, unquote(name))
             end
