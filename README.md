@@ -17,7 +17,7 @@ Perfect for caching OAuth tokens, API keys, and other time-sensitive data that s
 
 ```elixir
 def deps do
-  [{:expirable_store, "~> 0.1.0"}]
+  [{:expirable_store, "~> 0.4.0"}]
 end
 ```
 
