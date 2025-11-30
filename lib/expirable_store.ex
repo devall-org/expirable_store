@@ -137,6 +137,23 @@ defmodule ExpirableStore do
         end
       end)
     end)
+
+    # Wait for :pg to remove dead agents
+    wait_for_pg_cleanup(group)
+  end
+
+  defp wait_for_pg_cleanup(group, attempts \\ 10) do
+    case :pg.get_local_members(:expirable_store, group) do
+      [] ->
+        :ok
+
+      _ when attempts > 0 ->
+        Process.sleep(10)
+        wait_for_pg_cleanup(group, attempts - 1)
+
+      _ ->
+        :ok
+    end
   end
 
   defp get_cluster_agent(group) do

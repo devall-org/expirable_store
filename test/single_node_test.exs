@@ -4,11 +4,11 @@ defmodule ExpirableStore.SingleNodeTest do
 
   setup do
     :yes = :global.register_name(:fetch_tracker, self())
+    :ok = :global.sync()
 
     on_exit(fn ->
       TestExpirables.clear_all()
       :global.unregister_name(:fetch_tracker)
-      Process.sleep(10)
     end)
 
     :ok
