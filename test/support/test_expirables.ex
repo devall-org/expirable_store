@@ -13,8 +13,9 @@ defmodule TestExpirables do
         _ -> :ok
       end
 
+      Process.sleep(50)
       token = "cluster_lazy_#{:rand.uniform(10000)}"
-      expires_at = System.system_time(:millisecond) + 100
+      expires_at = System.system_time(:millisecond) + 200
       {:ok, token, expires_at}
     end
 
@@ -29,6 +30,7 @@ defmodule TestExpirables do
         _ -> :ok
       end
 
+      Process.sleep(50)
       :error
     end
 
@@ -47,8 +49,9 @@ defmodule TestExpirables do
         _ -> :ok
       end
 
+      Process.sleep(50)
       token = "cluster_eager_#{:rand.uniform(10000)}"
-      expires_at = System.system_time(:millisecond) + 100
+      expires_at = System.system_time(:millisecond) + 200
       {:ok, token, expires_at}
     end
 
@@ -67,8 +70,9 @@ defmodule TestExpirables do
         _ -> :ok
       end
 
+      Process.sleep(50)
       token = "local_lazy_#{:rand.uniform(10000)}_#{node()}"
-      expires_at = System.system_time(:millisecond) + 100
+      expires_at = System.system_time(:millisecond) + 200
       {:ok, token, expires_at}
     end
 
@@ -87,8 +91,9 @@ defmodule TestExpirables do
         _ -> :ok
       end
 
+      Process.sleep(50)
       token = "local_eager_#{:rand.uniform(10000)}"
-      expires_at = System.system_time(:millisecond) + 100
+      expires_at = System.system_time(:millisecond) + 200
       {:ok, token, expires_at}
     end
 

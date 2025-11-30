@@ -90,7 +90,11 @@ defmodule ExpirableStore do
   end
 
   defp acquire_lock_and_fetch_cluster(group, fetch_fn, refresh) do
-    :global.trans(group, fn ->
+    # Use {ResourceId, LockRequesterId} format where ResourceId is a tuple
+    # and LockRequesterId is self() to ensure each process has unique lock requester
+    lock_id = {group, self()}
+
+    :global.trans(lock_id, fn ->
       case get_cluster_agent(group) do
         nil ->
           local_pid = create_cluster_agent(group, fetch_fn, refresh)

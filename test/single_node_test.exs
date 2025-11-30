@@ -31,7 +31,7 @@ defmodule ExpirableStore.SingleNodeTest do
       assert token1 == token2
       assert expires_at1 == expires_at2
 
-      Process.sleep(105)
+      Process.sleep(210)
 
       {:ok, token3, expires_at3} = TestExpirables.fetch(:cluster_lazy)
       assert_receive {:fetch, :cluster_lazy, _}
@@ -79,8 +79,8 @@ defmodule ExpirableStore.SingleNodeTest do
       {:ok, token1, _} = TestExpirables.fetch(:cluster_eager)
       assert_receive {:fetch, :cluster_eager, _}
 
-      # Wait for eager refresh (should happen at ~90ms, before 100ms expiry)
-      Process.sleep(95)
+      # Wait for eager refresh to complete: 200ms * 0.9 delay + 50ms fetch + 10ms margin = 240ms
+      Process.sleep(240)
 
       # Eager refresh should have happened in background
       assert_receive {:fetch, :cluster_eager, _}
@@ -97,7 +97,7 @@ defmodule ExpirableStore.SingleNodeTest do
       assert length(:pg.get_members(:expirable_store, group)) == 1
     end
 
-    test "clear stops eager refresh" do
+    test "clear causes fresh fetch on next call" do
       {:ok, token1, _} = TestExpirables.fetch(:cluster_eager)
       assert_receive {:fetch, :cluster_eager, _}
 
@@ -123,7 +123,7 @@ defmodule ExpirableStore.SingleNodeTest do
       assert token1 == token2
       assert expires_at1 == expires_at2
 
-      Process.sleep(105)
+      Process.sleep(210)
 
       {:ok, token3, _} = TestExpirables.fetch(:local_lazy)
       assert_receive {:fetch, :local_lazy, _}
@@ -159,8 +159,8 @@ defmodule ExpirableStore.SingleNodeTest do
       {:ok, token1, _} = TestExpirables.fetch(:local_eager)
       assert_receive {:fetch, :local_eager, _}
 
-      # Wait for eager refresh (should happen at ~90ms)
-      Process.sleep(95)
+      # Wait for eager refresh to complete: 200ms * 0.9 delay + 50ms fetch + 10ms margin = 240ms
+      Process.sleep(240)
 
       assert_receive {:fetch, :local_eager, _}
       {:ok, token2, _} = TestExpirables.fetch(:local_eager)
@@ -172,7 +172,7 @@ defmodule ExpirableStore.SingleNodeTest do
       assert length(:pg.get_members(:expirable_store, {TestExpirables, :local_eager})) == 0
     end
 
-    test "clear stops eager refresh" do
+    test "clear causes fresh fetch on next call" do
       {:ok, token1, _} = TestExpirables.fetch(:local_eager)
       assert_receive {:fetch, :local_eager, _}
 
