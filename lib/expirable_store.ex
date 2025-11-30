@@ -18,8 +18,7 @@ defmodule ExpirableStore do
     %{fetch: fetch_fn, scope: scope, refresh: refresh} =
       ExpirableStore.Info.expirables(module) |> Enum.find(fn e -> e.name == name end)
 
-    result = ExpirableStore.Store.fetch(module, name, fetch_fn, refresh, scope)
-    to_external(result)
+    ExpirableStore.Store.fetch(module, name, fetch_fn, refresh, scope)
   end
 
   @doc """
@@ -53,12 +52,4 @@ defmodule ExpirableStore do
       ExpirableStore.clear(module, name)
     end)
   end
-
-  # ===========================================================================
-  # Helpers
-  # ===========================================================================
-
-  # Convert internal Agent state to external format (for API return)
-  defp to_external({:__ready__, value, expires_at}), do: {:ok, value, expires_at}
-  defp to_external(:__error__), do: :error
 end

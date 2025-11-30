@@ -13,10 +13,10 @@ defmodule ExpirableStore.Store do
       acquire_lock_and_fetch(group, fetch_fn, refresh, scope)
     else
       case Agent.get(local_pid, & &1) do
-        :__error__ ->
+        :error ->
           acquire_lock_and_fetch(group, fetch_fn, refresh, scope)
 
-        {:__ready__, _, expires_at} = entry ->
+        {:ok, _, expires_at} = entry ->
           if expired?(expires_at) do
             acquire_lock_and_fetch(group, fetch_fn, refresh, scope)
           else
@@ -69,15 +69,15 @@ defmodule ExpirableStore.Store do
         Agent.get(new_pid, & &1)
       else
         case Agent.get(local_pid, & &1) do
-          :__error__ ->
-            new_entry = to_internal(fetch_fn.())
+          :error ->
+            new_entry = fetch_fn.()
             update_all_members(group, new_entry)
             schedule_eager_refresh(group, new_entry, fetch_fn, refresh, scope)
             new_entry
 
-          {:__ready__, _, expires_at} = entry ->
+          {:ok, _, expires_at} = entry ->
             if expired?(expires_at) do
-              new_entry = to_internal(fetch_fn.())
+              new_entry = fetch_fn.()
               update_all_members(group, new_entry)
               schedule_eager_refresh(group, new_entry, fetch_fn, refresh, scope)
               new_entry
@@ -118,7 +118,7 @@ defmodule ExpirableStore.Store do
       try do
         Agent.get(pid, & &1)
       catch
-        :exit, _ -> :__error__
+        :exit, _ -> :error
       end
     end)
   end
@@ -126,8 +126,8 @@ defmodule ExpirableStore.Store do
   defp create_agent(group, fetch_fn, refresh, scope) do
     initial_value =
       case get_value_from_cluster(group) do
-        {:__ready__, _, _} = entry -> entry
-        _ -> to_internal(fetch_fn.())
+        {:ok, _, _} = entry -> entry
+        _ -> fetch_fn.()
       end
 
     spec = %{
@@ -160,10 +160,10 @@ defmodule ExpirableStore.Store do
   # Eager refresh scheduling
   # ===========================================================================
 
-  defp schedule_eager_refresh(_group, :__error__, _fetch_fn, _refresh, _scope), do: :ok
+  defp schedule_eager_refresh(_group, :error, _fetch_fn, _refresh, _scope), do: :ok
   defp schedule_eager_refresh(_group, _entry, _fetch_fn, :lazy, _scope), do: :ok
 
-  defp schedule_eager_refresh(group, {:__ready__, _value, expires_at}, fetch_fn, :eager, scope) do
+  defp schedule_eager_refresh(group, {:ok, _value, expires_at}, fetch_fn, :eager, scope) do
     now = System.system_time(:millisecond)
     ttl = expires_at - now
 
@@ -188,7 +188,7 @@ defmodule ExpirableStore.Store do
       if is_nil(local_pid) or not Process.alive?(local_pid) do
         :ok
       else
-        new_entry = to_internal(fetch_fn.())
+        new_entry = fetch_fn.()
         update_all_members(group, new_entry)
         schedule_eager_refresh(group, new_entry, fetch_fn, :eager, scope)
       end
@@ -202,7 +202,4 @@ defmodule ExpirableStore.Store do
   defp expired?(expires_at) do
     System.system_time(:millisecond) > expires_at
   end
-
-  defp to_internal({:ok, value, expires_at}), do: {:__ready__, value, expires_at}
-  defp to_internal(:error), do: :__error__
 end
