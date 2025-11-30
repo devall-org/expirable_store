@@ -18,10 +18,13 @@ defmodule ExpirableStore do
     %{fetch: fetch_fn, scope: scope, refresh: refresh} =
       ExpirableStore.Info.expirables(module) |> Enum.find(fn e -> e.name == name end)
 
-    case scope do
-      :cluster -> fetch_cluster(module, name, fetch_fn, refresh)
-      :local -> fetch_local(module, name, fetch_fn, refresh)
-    end
+    result =
+      case scope do
+        :cluster -> fetch_cluster(module, name, fetch_fn, refresh)
+        :local -> fetch_local(module, name, fetch_fn, refresh)
+      end
+
+    to_external(result)
   end
 
   @doc """
@@ -65,64 +68,50 @@ defmodule ExpirableStore do
 
   defp fetch_cluster(module, name, fetch_fn, refresh) do
     group = {module, name}
+    local_pid = get_local_cluster_agent(group)
 
-    case get_cluster_agent(group) do
-      nil ->
-        acquire_lock_and_fetch_cluster(group, fetch_fn, refresh)
-
-      local_pid ->
-        if Process.alive?(local_pid) do
-          case Agent.get(local_pid, & &1) do
-            :error ->
-              acquire_lock_and_fetch_cluster(group, fetch_fn, refresh)
-
-            {:ok, _, expires_at} = entry ->
-              if expired?(expires_at) do
-                acquire_lock_and_fetch_cluster(group, fetch_fn, refresh)
-              else
-                entry
-              end
-          end
-        else
+    if is_nil(local_pid) or not Process.alive?(local_pid) do
+      acquire_lock_and_fetch_cluster(group, fetch_fn, refresh)
+    else
+      case Agent.get(local_pid, & &1) do
+        :__error__ ->
           acquire_lock_and_fetch_cluster(group, fetch_fn, refresh)
-        end
+
+        {:__ready__, _, expires_at} = entry ->
+          if expired?(expires_at) do
+            acquire_lock_and_fetch_cluster(group, fetch_fn, refresh)
+          else
+            entry
+          end
+      end
     end
   end
 
   defp acquire_lock_and_fetch_cluster(group, fetch_fn, refresh) do
-    # Use {ResourceId, LockRequesterId} format where ResourceId is a tuple
-    # and LockRequesterId is self() to ensure each process has unique lock requester
-    lock_id = {group, self()}
+    :global.trans({group, self()}, fn ->
+      local_pid = get_local_cluster_agent(group)
 
-    :global.trans(lock_id, fn ->
-      case get_cluster_agent(group) do
-        nil ->
-          local_pid = create_cluster_agent(group, fetch_fn, refresh)
-          Agent.get(local_pid, & &1)
+      if is_nil(local_pid) or not Process.alive?(local_pid) do
+        new_pid = create_cluster_agent(group, fetch_fn, refresh)
+        Agent.get(new_pid, & &1)
+      else
+        case Agent.get(local_pid, & &1) do
+          :__error__ ->
+            new_entry = to_internal(fetch_fn.())
+            update_all_cluster_members(group, new_entry)
+            schedule_eager_refresh_cluster(group, new_entry, fetch_fn, refresh)
+            new_entry
 
-        local_pid ->
-          if Process.alive?(local_pid) do
-            case Agent.get(local_pid, & &1) do
-              :error ->
-                new_entry = fetch_fn.()
-                update_all_cluster_members(group, new_entry)
-                schedule_eager_refresh_cluster(group, new_entry, fetch_fn, refresh)
-                new_entry
-
-              {:ok, _, expires_at} = entry ->
-                if expired?(expires_at) do
-                  new_entry = fetch_fn.()
-                  update_all_cluster_members(group, new_entry)
-                  schedule_eager_refresh_cluster(group, new_entry, fetch_fn, refresh)
-                  new_entry
-                else
-                  entry
-                end
+          {:__ready__, _, expires_at} = entry ->
+            if expired?(expires_at) do
+              new_entry = to_internal(fetch_fn.())
+              update_all_cluster_members(group, new_entry)
+              schedule_eager_refresh_cluster(group, new_entry, fetch_fn, refresh)
+              new_entry
+            else
+              entry
             end
-          else
-            new_pid = create_cluster_agent(group, fetch_fn, refresh)
-            Agent.get(new_pid, & &1)
-          end
+        end
       end
     end)
   end
@@ -130,7 +119,7 @@ defmodule ExpirableStore do
   defp clear_cluster(module, name) do
     group = {module, name}
 
-    :global.trans(group, fn ->
+    :global.trans({group, self()}, fn ->
       group
       |> get_all_cluster_agents()
       |> Enum.each(fn pid ->
@@ -160,7 +149,7 @@ defmodule ExpirableStore do
     end
   end
 
-  defp get_cluster_agent(group) do
+  defp get_local_cluster_agent(group) do
     :pg.get_local_members(:expirable_store, group)
     |> List.first()
   end
@@ -175,7 +164,7 @@ defmodule ExpirableStore do
       try do
         Agent.get(pid, & &1)
       catch
-        :exit, _ -> :error
+        :exit, _ -> :__error__
       end
     end)
   end
@@ -183,8 +172,8 @@ defmodule ExpirableStore do
   defp create_cluster_agent(group, fetch_fn, refresh) do
     initial_value =
       case get_value_from_cluster(group) do
-        {:ok, _, _} = entry -> entry
-        _ -> fetch_fn.()
+        {:__ready__, _, _} = entry -> entry
+        _ -> to_internal(fetch_fn.())
       end
 
     spec = %{
@@ -219,37 +208,36 @@ defmodule ExpirableStore do
 
   defp fetch_local(module, name, fetch_fn, refresh) do
     key = {module, name}
+    local_pid = get_local_agent(key)
 
-    case get_local_agent(key) do
-      nil ->
-        create_or_fetch_local(key, fetch_fn, refresh)
+    if is_nil(local_pid) or not Process.alive?(local_pid) do
+      create_or_fetch_local(key, fetch_fn, refresh)
+    else
+      case Agent.get(local_pid, & &1) do
+        :__error__ ->
+          refetch_local(local_pid, key, fetch_fn, refresh)
 
-      local_pid ->
-        if Process.alive?(local_pid) do
-          case Agent.get(local_pid, & &1) do
-            :error ->
-              refetch_local(local_pid, key, fetch_fn, refresh)
-
-            {:ok, _, expires_at} = entry ->
-              if expired?(expires_at) do
-                refetch_local(local_pid, key, fetch_fn, refresh)
-              else
-                entry
-              end
-
-            {:__refreshing__, old_entry} ->
-              # Refresh in progress - return old value or wait
-              handle_refreshing_state(local_pid, old_entry)
+        {:__ready__, _, expires_at} = entry ->
+          if expired?(expires_at) do
+            refetch_local(local_pid, key, fetch_fn, refresh)
+          else
+            entry
           end
-        else
-          create_or_fetch_local(key, fetch_fn, refresh)
-        end
+
+        {:__refreshing__, old_entry} ->
+          # Refresh in progress - return old value or wait
+          handle_refreshing_state(local_pid, old_entry)
+
+        {:__fetching__, _} ->
+          # Initial fetch in progress - wait for result
+          wait_for_refresh_local(local_pid)
+      end
     end
   end
 
-  defp handle_refreshing_state(_pid, {:ok, _, _} = old_entry), do: old_entry
+  defp handle_refreshing_state(_pid, {:__ready__, _, _} = old_entry), do: old_entry
 
-  defp handle_refreshing_state(pid, :error) do
+  defp handle_refreshing_state(pid, :__error__) do
     wait_for_refresh_local(pid)
   end
 
@@ -259,7 +247,7 @@ defmodule ExpirableStore do
         Process.sleep(10)
         wait_for_refresh_local(pid)
 
-      {:__pending__, _} ->
+      {:__fetching__, _} ->
         Process.sleep(10)
         wait_for_refresh_local(pid)
 
@@ -268,17 +256,17 @@ defmodule ExpirableStore do
     end
   end
 
-  # Handle race condition: create agent with pending marker, then fetch value
+  # Handle race condition: create agent with fetching marker, then fetch value
   # This ensures fetch_fn is called only once even with concurrent requests
   defp create_or_fetch_local(key, fetch_fn, refresh) do
-    pending_ref = make_ref()
+    fetching_ref = make_ref()
 
     spec = %{
       id: {:local, key},
       start:
         {Agent, :start_link,
          [
-           fn -> {:__pending__, pending_ref} end,
+           fn -> {:__fetching__, fetching_ref} end,
            [name: {:via, Registry, {ExpirableStore.LocalRegistry, key}}]
          ]},
       restart: :temporary
@@ -287,9 +275,9 @@ defmodule ExpirableStore do
     case DynamicSupervisor.start_child(ExpirableStore.Supervisor, spec) do
       {:ok, pid} ->
         # We won the race, fetch the value
-        value = fetch_fn.()
+        value = to_internal(fetch_fn.())
 
-        Agent.update(pid, fn {:__pending__, ^pending_ref} -> value end)
+        Agent.update(pid, fn {:__fetching__, ^fetching_ref} -> value end)
 
         value
         |> tap(fn v -> schedule_eager_refresh_local(key, v, fetch_fn, refresh) end)
@@ -302,7 +290,7 @@ defmodule ExpirableStore do
 
   defp wait_for_local_value(pid) do
     case Agent.get(pid, & &1) do
-      {:__pending__, ref} when is_reference(ref) ->
+      {:__fetching__, ref} when is_reference(ref) ->
         Process.sleep(10)
         wait_for_local_value(pid)
 
@@ -318,22 +306,30 @@ defmodule ExpirableStore do
              # Already refreshing - return old entry
              {{:already_refreshing, old_entry}, {:__refreshing__, old_entry}}
 
+           {:__fetching__, _} = state ->
+             # Initial fetch in progress - don't interfere
+             {{:fetching, state}, state}
+
            entry ->
              # Start refresh - set refreshing state
              {{:do_refresh, entry}, {:__refreshing__, entry}}
          end) do
       {:do_refresh, _old_entry} ->
-        new_entry = fetch_fn.()
+        new_entry = to_internal(fetch_fn.())
         Agent.update(pid, fn {:__refreshing__, _} -> new_entry end)
         schedule_eager_refresh_local(key, new_entry, fetch_fn, refresh)
         new_entry
 
-      {:already_refreshing, {:ok, _, _} = old_entry} ->
+      {:already_refreshing, {:__ready__, _, _} = old_entry} ->
         # Already refreshing, return old (possibly expired) value
         old_entry
 
-      {:already_refreshing, :error} ->
+      {:already_refreshing, :__error__} ->
         # Already refreshing but no old value - wait for result
+        wait_for_refresh_local(pid)
+
+      {:fetching, _} ->
+        # Initial fetch in progress - wait for result
         wait_for_refresh_local(pid)
     end
   end
@@ -367,10 +363,10 @@ defmodule ExpirableStore do
   # Eager refresh scheduling (cluster)
   # ===========================================================================
 
-  defp schedule_eager_refresh_cluster(_group, :error, _fetch_fn, _refresh), do: :ok
+  defp schedule_eager_refresh_cluster(_group, :__error__, _fetch_fn, _refresh), do: :ok
   defp schedule_eager_refresh_cluster(_group, _entry, _fetch_fn, :lazy), do: :ok
 
-  defp schedule_eager_refresh_cluster(group, {:ok, _value, expires_at}, fetch_fn, :eager) do
+  defp schedule_eager_refresh_cluster(group, {:__ready__, _value, expires_at}, fetch_fn, :eager) do
     now = System.system_time(:millisecond)
     ttl = expires_at - now
 
@@ -389,14 +385,14 @@ defmodule ExpirableStore do
   end
 
   defp do_eager_refresh_cluster(group, fetch_fn) do
-    :global.trans(group, fn ->
-      case get_cluster_agent(group) do
+    :global.trans({group, self()}, fn ->
+      case get_local_cluster_agent(group) do
         nil ->
           :ok
 
         local_pid ->
           if Process.alive?(local_pid) do
-            new_entry = fetch_fn.()
+            new_entry = to_internal(fetch_fn.())
             update_all_cluster_members(group, new_entry)
             schedule_eager_refresh_cluster(group, new_entry, fetch_fn, :eager)
           end
@@ -408,10 +404,10 @@ defmodule ExpirableStore do
   # Eager refresh scheduling (local)
   # ===========================================================================
 
-  defp schedule_eager_refresh_local(_key, :error, _fetch_fn, _refresh), do: :ok
+  defp schedule_eager_refresh_local(_key, :__error__, _fetch_fn, _refresh), do: :ok
   defp schedule_eager_refresh_local(_key, _entry, _fetch_fn, :lazy), do: :ok
 
-  defp schedule_eager_refresh_local(key, {:ok, _value, expires_at}, fetch_fn, :eager) do
+  defp schedule_eager_refresh_local(key, {:__ready__, _value, expires_at}, fetch_fn, :eager) do
     now = System.system_time(:millisecond)
     ttl = expires_at - now
 
@@ -442,16 +438,23 @@ defmodule ExpirableStore do
                    # Already refreshing - skip
                    {:already_refreshing, state}
 
+                 {:__fetching__, _} = state ->
+                   # Initial fetch in progress - skip
+                   {:fetching, state}
+
                  entry ->
                    # Start refresh
                    {:do_refresh, {:__refreshing__, entry}}
                end) do
             :do_refresh ->
-              new_entry = fetch_fn.()
+              new_entry = to_internal(fetch_fn.())
               Agent.update(pid, fn {:__refreshing__, _} -> new_entry end)
               schedule_eager_refresh_local(key, new_entry, fetch_fn, :eager)
 
             :already_refreshing ->
+              :ok
+
+            :fetching ->
               :ok
           end
         end
@@ -465,4 +468,12 @@ defmodule ExpirableStore do
   defp expired?(expires_at) do
     System.system_time(:millisecond) > expires_at
   end
+
+  # Convert external format (from fetch_fn or API) to internal Agent state
+  defp to_internal({:ok, value, expires_at}), do: {:__ready__, value, expires_at}
+  defp to_internal(:error), do: :__error__
+
+  # Convert internal Agent state to external format (for API return)
+  defp to_external({:__ready__, value, expires_at}), do: {:ok, value, expires_at}
+  defp to_external(:__error__), do: :error
 end
