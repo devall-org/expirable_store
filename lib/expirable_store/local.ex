@@ -10,26 +10,18 @@ defmodule ExpirableStore.Local do
     local_pid = get_agent(key)
 
     if is_nil(local_pid) or not Process.alive?(local_pid) do
-      create_or_fetch(key, fetch_fn, refresh)
+      acquire_lock_and_fetch(key, fetch_fn, refresh)
     else
       case Agent.get(local_pid, & &1) do
         :__error__ ->
-          refetch(local_pid, key, fetch_fn, refresh)
+          acquire_lock_and_fetch(key, fetch_fn, refresh)
 
         {:__ready__, _, expires_at} = entry ->
           if expired?(expires_at) do
-            refetch(local_pid, key, fetch_fn, refresh)
+            acquire_lock_and_fetch(key, fetch_fn, refresh)
           else
             entry
           end
-
-        {:__refreshing__, old_entry} ->
-          # Refresh in progress - return old value or wait
-          handle_refreshing_state(local_pid, old_entry)
-
-        {:__fetching__, _} ->
-          # Initial fetch in progress - wait for result
-          wait_for_refresh(local_pid)
       end
     end
   end
@@ -37,17 +29,23 @@ defmodule ExpirableStore.Local do
   def clear(module, name) do
     key = {module, name}
 
-    case get_agent(key) do
-      nil ->
-        :ok
+    :global.trans(
+      {key, self()},
+      fn ->
+        case get_agent(key) do
+          nil ->
+            :ok
 
-      pid ->
-        try do
-          Agent.stop(pid)
-        catch
-          _, _ -> :ok
+          pid ->
+            try do
+              Agent.stop(pid)
+            catch
+              _, _ -> :ok
+            end
         end
-    end
+      end,
+      [node()]
+    )
 
     :ok
   end
@@ -56,103 +54,37 @@ defmodule ExpirableStore.Local do
   # Private implementation
   # ===========================================================================
 
-  defp handle_refreshing_state(_pid, {:__ready__, _, _} = old_entry), do: old_entry
+  defp acquire_lock_and_fetch(key, fetch_fn, refresh) do
+    :global.trans(
+      {key, self()},
+      fn ->
+        local_pid = get_agent(key)
 
-  defp handle_refreshing_state(pid, :__error__) do
-    wait_for_refresh(pid)
-  end
+        if is_nil(local_pid) or not Process.alive?(local_pid) do
+          new_pid = create_agent(key, fetch_fn, refresh)
+          Agent.get(new_pid, & &1)
+        else
+          case Agent.get(local_pid, & &1) do
+            :__error__ ->
+              new_entry = to_internal(fetch_fn.())
+              Agent.update(local_pid, fn _ -> new_entry end)
+              schedule_eager_refresh(key, new_entry, fetch_fn, refresh)
+              new_entry
 
-  defp wait_for_refresh(pid) do
-    case Agent.get(pid, & &1) do
-      {:__refreshing__, _} ->
-        Process.sleep(10)
-        wait_for_refresh(pid)
-
-      {:__fetching__, _} ->
-        Process.sleep(10)
-        wait_for_refresh(pid)
-
-      value ->
-        value
-    end
-  end
-
-  # Handle race condition: create agent with fetching marker, then fetch value
-  # This ensures fetch_fn is called only once even with concurrent requests
-  defp create_or_fetch(key, fetch_fn, refresh) do
-    fetching_ref = make_ref()
-
-    spec = %{
-      id: {:local, key},
-      start:
-        {Agent, :start_link,
-         [
-           fn -> {:__fetching__, fetching_ref} end,
-           [name: {:via, Registry, {ExpirableStore.LocalRegistry, key}}]
-         ]},
-      restart: :temporary
-    }
-
-    case DynamicSupervisor.start_child(ExpirableStore.Supervisor, spec) do
-      {:ok, pid} ->
-        # We won the race, fetch the value
-        value = to_internal(fetch_fn.())
-
-        Agent.update(pid, fn {:__fetching__, ^fetching_ref} -> value end)
-
-        value
-        |> tap(fn v -> schedule_eager_refresh(key, v, fetch_fn, refresh) end)
-
-      {:error, {:already_started, pid}} ->
-        # Another process is fetching, wait for result
-        wait_for_value(pid)
-    end
-  end
-
-  defp wait_for_value(pid) do
-    case Agent.get(pid, & &1) do
-      {:__fetching__, ref} when is_reference(ref) ->
-        Process.sleep(10)
-        wait_for_value(pid)
-
-      value ->
-        value
-    end
-  end
-
-  defp refetch(pid, key, fetch_fn, refresh) do
-    # CAS: acquire refresh lock
-    case Agent.get_and_update(pid, fn
-           {:__refreshing__, old_entry} ->
-             # Already refreshing - return old entry
-             {{:already_refreshing, old_entry}, {:__refreshing__, old_entry}}
-
-           {:__fetching__, _} = state ->
-             # Initial fetch in progress - don't interfere
-             {{:fetching, state}, state}
-
-           entry ->
-             # Start refresh - set refreshing state
-             {{:do_refresh, entry}, {:__refreshing__, entry}}
-         end) do
-      {:do_refresh, _old_entry} ->
-        new_entry = to_internal(fetch_fn.())
-        Agent.update(pid, fn {:__refreshing__, _} -> new_entry end)
-        schedule_eager_refresh(key, new_entry, fetch_fn, refresh)
-        new_entry
-
-      {:already_refreshing, {:__ready__, _, _} = old_entry} ->
-        # Already refreshing, return old (possibly expired) value
-        old_entry
-
-      {:already_refreshing, :__error__} ->
-        # Already refreshing but no old value - wait for result
-        wait_for_refresh(pid)
-
-      {:fetching, _} ->
-        # Initial fetch in progress - wait for result
-        wait_for_refresh(pid)
-    end
+            {:__ready__, _, expires_at} = entry ->
+              if expired?(expires_at) do
+                new_entry = to_internal(fetch_fn.())
+                Agent.update(local_pid, fn _ -> new_entry end)
+                schedule_eager_refresh(key, new_entry, fetch_fn, refresh)
+                new_entry
+              else
+                entry
+              end
+          end
+        end
+      end,
+      [node()]
+    )
   end
 
   defp get_agent(key) do
@@ -160,6 +92,27 @@ defmodule ExpirableStore.Local do
       [{pid, _}] -> pid
       [] -> nil
     end
+  end
+
+  defp create_agent(key, fetch_fn, refresh) do
+    initial_value = to_internal(fetch_fn.())
+
+    spec = %{
+      id: {:local, key},
+      start:
+        {Agent, :start_link,
+         [
+           fn -> initial_value end,
+           [name: {:via, Registry, {ExpirableStore.LocalRegistry, key}}]
+         ]},
+      restart: :temporary
+    }
+
+    {:ok, pid} = DynamicSupervisor.start_child(ExpirableStore.Supervisor, spec)
+
+    schedule_eager_refresh(key, initial_value, fetch_fn, refresh)
+
+    pid
   end
 
   # ===========================================================================
@@ -188,37 +141,21 @@ defmodule ExpirableStore.Local do
   end
 
   defp do_eager_refresh(key, fetch_fn) do
-    local_pid = get_agent(key)
+    :global.trans(
+      {key, self()},
+      fn ->
+        local_pid = get_agent(key)
 
-    if is_nil(local_pid) or not Process.alive?(local_pid) do
-      :ok
-    else
-      # CAS: acquire refresh lock
-      case Agent.get_and_update(local_pid, fn
-             {:__refreshing__, _} = state ->
-               # Already refreshing - skip
-               {:already_refreshing, state}
-
-             {:__fetching__, _} = state ->
-               # Initial fetch in progress - skip
-               {:fetching, state}
-
-             entry ->
-               # Start refresh
-               {:do_refresh, {:__refreshing__, entry}}
-           end) do
-        :do_refresh ->
+        if is_nil(local_pid) or not Process.alive?(local_pid) do
+          :ok
+        else
           new_entry = to_internal(fetch_fn.())
-          Agent.update(local_pid, fn {:__refreshing__, _} -> new_entry end)
+          Agent.update(local_pid, fn _ -> new_entry end)
           schedule_eager_refresh(key, new_entry, fetch_fn, :eager)
-
-        :already_refreshing ->
-          :ok
-
-        :fetching ->
-          :ok
-      end
-    end
+        end
+      end,
+      [node()]
+    )
   end
 
   # ===========================================================================
