@@ -154,13 +154,17 @@ defmodule ExpirableStore do
       try do
         Agent.get(pid, & &1)
       catch
-        :exit, _ -> nil
+        :exit, _ -> :error
       end
     end)
   end
 
   defp create_cluster_agent(group, fetch_fn, refresh) do
-    initial_value = get_value_from_cluster(group) || fetch_fn.()
+    initial_value =
+      case get_value_from_cluster(group) do
+        {:ok, _, _} = entry -> entry
+        _ -> fetch_fn.()
+      end
 
     spec = %{
       id: {:cluster, group},

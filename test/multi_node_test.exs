@@ -7,6 +7,8 @@ defmodule ExpirableStore.MultiNodeTest do
     nodes = ClusterHelper.start_nodes([:node2])
     [{_pid2, node2}] = nodes
     :yes = :global.register_name(:fetch_tracker, self())
+    :ok = :global.sync()
+    wait_for_global_sync(node2, :fetch_tracker)
 
     on_exit(fn ->
       TestExpirables.clear_all()
@@ -37,6 +39,14 @@ defmodule ExpirableStore.MultiNodeTest do
 
       {:ok, token3, _} = :erpc.call(node2, TestExpirables, :fetch, [:cluster_lazy])
       assert token3 == token2
+    end
+
+    test "does not store fetch failures", %{node2: node2} do
+      :error = TestExpirables.fetch(:cluster_lazy_fail)
+      assert_receive {:fetch, :cluster_lazy_fail, _}
+
+      :error = :erpc.call(node2, TestExpirables, :fetch, [:cluster_lazy_fail])
+      assert_receive {:fetch, :cluster_lazy_fail, _}
     end
 
     test "each node has local replica via :pg", %{node2: node2} do
@@ -164,6 +174,20 @@ defmodule ExpirableStore.MultiNodeTest do
       # node2 should still get its own independent token
       {:ok, token3, _} = :erpc.call(node2, TestExpirables, :fetch, [:local_eager])
       assert token3 != token2
+    end
+  end
+
+  defp wait_for_global_sync(node, name, attempts \\ 10) do
+    case :erpc.call(node, :global, :whereis_name, [name]) do
+      pid when is_pid(pid) ->
+        :ok
+
+      :undefined when attempts > 0 ->
+        Process.sleep(10)
+        wait_for_global_sync(node, name, attempts - 1)
+
+      :undefined ->
+        raise "Global sync timeout for #{inspect(name)} on #{node}"
     end
   end
 end
