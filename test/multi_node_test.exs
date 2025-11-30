@@ -23,8 +23,8 @@ defmodule ExpirableStore.MultiNodeTest do
 
   describe "scope :cluster, refresh :lazy (multi-node)" do
     test "value is replicated across nodes", %{node2: node2} do
-      {:ok, token1, _} = TestExpirables.fetch(:cluster_lazy)
-      {:ok, token2, _} = :erpc.call(node2, TestExpirables, :fetch, [:cluster_lazy])
+      {:ok, token1, _} = :erpc.call(node2, TestExpirables, :fetch, [:cluster_lazy])
+      {:ok, token2, _} = TestExpirables.fetch(:cluster_lazy)
       assert token1 == token2
     end
 
@@ -63,8 +63,8 @@ defmodule ExpirableStore.MultiNodeTest do
 
       Process.sleep(250)
 
-      task1 = Task.async(fn -> TestExpirables.fetch(:cluster_lazy) end)
-      task2 = Task.async(fn -> :erpc.call(node2, TestExpirables, :fetch, [:cluster_lazy]) end)
+      task1 = Task.async(fn -> :erpc.call(node2, TestExpirables, :fetch, [:cluster_lazy]) end)
+      task2 = Task.async(fn -> TestExpirables.fetch(:cluster_lazy) end)
 
       {:ok, token1, _} = Task.await(task1)
       {:ok, token2, _} = Task.await(task2)
@@ -83,8 +83,8 @@ defmodule ExpirableStore.MultiNodeTest do
 
   describe "scope :cluster, refresh :eager (multi-node)" do
     test "value is replicated across nodes", %{node2: node2} do
-      {:ok, token1, _} = TestExpirables.fetch(:cluster_eager)
-      {:ok, token2, _} = :erpc.call(node2, TestExpirables, :fetch, [:cluster_eager])
+      {:ok, token1, _} = :erpc.call(node2, TestExpirables, :fetch, [:cluster_eager])
+      {:ok, token2, _} = TestExpirables.fetch(:cluster_eager)
       assert token1 == token2
     end
 
@@ -113,29 +113,29 @@ defmodule ExpirableStore.MultiNodeTest do
 
   describe "scope :local, refresh :lazy (multi-node)" do
     test "is NOT replicated across nodes", %{node2: node2} do
-      {:ok, token1, _} = TestExpirables.fetch(:local_lazy)
-      {:ok, token2, _} = :erpc.call(node2, TestExpirables, :fetch, [:local_lazy])
+      {:ok, token1, _} = :erpc.call(node2, TestExpirables, :fetch, [:local_lazy])
+      {:ok, token2, _} = TestExpirables.fetch(:local_lazy)
 
       assert token1 != token2
-      assert String.contains?(token1, to_string(node()))
-      assert String.contains?(token2, to_string(node2))
+      assert String.contains?(token1, to_string(node2))
+      assert String.contains?(token2, to_string(node()))
     end
 
     test "stores independently per node", %{node2: node2} do
-      {:ok, token1a, _} = TestExpirables.fetch(:local_lazy)
-      {:ok, token1b, _} = TestExpirables.fetch(:local_lazy)
+      {:ok, token1a, _} = :erpc.call(node2, TestExpirables, :fetch, [:local_lazy])
+      {:ok, token1b, _} = :erpc.call(node2, TestExpirables, :fetch, [:local_lazy])
       assert token1a == token1b
 
-      {:ok, token2a, _} = :erpc.call(node2, TestExpirables, :fetch, [:local_lazy])
+      {:ok, token2a, _} = TestExpirables.fetch(:local_lazy)
       assert token2a != token1a
 
-      {:ok, token2b, _} = :erpc.call(node2, TestExpirables, :fetch, [:local_lazy])
+      {:ok, token2b, _} = TestExpirables.fetch(:local_lazy)
       assert token2a == token2b
     end
 
     test "does not use :pg groups", %{node2: node2} do
-      {:ok, _, _} = TestExpirables.fetch(:local_lazy)
       {:ok, _, _} = :erpc.call(node2, TestExpirables, :fetch, [:local_lazy])
+      {:ok, _, _} = TestExpirables.fetch(:local_lazy)
 
       assert length(:pg.get_members(:expirable_store, {TestExpirables, :local_lazy})) == 0
     end
@@ -147,8 +147,8 @@ defmodule ExpirableStore.MultiNodeTest do
 
   describe "scope :local, refresh :eager (multi-node)" do
     test "is NOT replicated across nodes", %{node2: node2} do
-      {:ok, token1, _} = TestExpirables.fetch(:local_eager)
-      {:ok, token2, _} = :erpc.call(node2, TestExpirables, :fetch, [:local_eager])
+      {:ok, token1, _} = :erpc.call(node2, TestExpirables, :fetch, [:local_eager])
+      {:ok, token2, _} = TestExpirables.fetch(:local_eager)
 
       assert token1 != token2
     end

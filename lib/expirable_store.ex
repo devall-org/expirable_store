@@ -148,15 +148,20 @@ defmodule ExpirableStore do
     :pg.get_members(:expirable_store, group)
   end
 
-  defp create_cluster_agent(group, fetch_fn, refresh) do
-    initial_value =
-      case :pg.get_members(:expirable_store, group) do
-        [remote_pid | _] ->
-          Agent.get(remote_pid, & &1)
-
-        [] ->
-          fetch_fn.()
+  defp get_value_from_cluster(group) do
+    :pg.get_members(:expirable_store, group)
+    |> Enum.find_value(fn pid ->
+      try do
+        Agent.get(pid, & &1)
+      catch
+        :exit, _ -> nil
       end
+    end)
+  end
+
+  defp create_cluster_agent(group, fetch_fn, refresh) do
+    initial_value = get_value_from_cluster(group) || fetch_fn.()
+
 
     spec = %{
       id: {:cluster, group},
