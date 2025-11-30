@@ -206,4 +206,3 @@ defmodule ExpirableStore.Store do
   defp to_internal({:ok, value, expires_at}), do: {:__ready__, value, expires_at}
   defp to_internal(:error), do: :__error__
 end
-
