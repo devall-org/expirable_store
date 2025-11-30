@@ -3,15 +3,11 @@ defmodule ExpirableStore.SingleNodeTest do
   doctest ExpirableStore
 
   setup do
-    Process.register(self(), :fetch_tracker)
+    :yes = :global.register_name(:fetch_tracker, self())
 
     on_exit(fn ->
       TestExpirables.clear_all()
-
-      if Process.whereis(:fetch_tracker) do
-        Process.unregister(:fetch_tracker)
-      end
-
+      :global.unregister_name(:fetch_tracker)
       Process.sleep(10)
     end)
 
@@ -53,13 +49,13 @@ defmodule ExpirableStore.SingleNodeTest do
 
     test "agents are added to :pg groups" do
       group = {TestExpirables, :cluster_lazy}
-      assert :pg.get_members(:expirable_store, group) == []
+      assert length(:pg.get_members(:expirable_store, group)) == 0
 
       {:ok, _, _} = TestExpirables.fetch(:cluster_lazy)
       assert length(:pg.get_members(:expirable_store, group)) == 1
 
       TestExpirables.clear(:cluster_lazy)
-      assert :pg.get_members(:expirable_store, group) == []
+      assert length(:pg.get_members(:expirable_store, group)) == 0
     end
 
     test "clear removes value before expiration" do
@@ -96,7 +92,7 @@ defmodule ExpirableStore.SingleNodeTest do
 
     test "agents are added to :pg groups" do
       group = {TestExpirables, :cluster_eager}
-      assert :pg.get_members(:expirable_store, group) == []
+      assert length(:pg.get_members(:expirable_store, group)) == 0
 
       {:ok, _, _} = TestExpirables.fetch(:cluster_eager)
       assert length(:pg.get_members(:expirable_store, group)) == 1
@@ -137,7 +133,7 @@ defmodule ExpirableStore.SingleNodeTest do
 
     test "does not use pg groups" do
       {:ok, _, _} = TestExpirables.fetch(:local_lazy)
-      assert :pg.get_members(:expirable_store, {TestExpirables, :local_lazy}) == []
+      assert length(:pg.get_members(:expirable_store, {TestExpirables, :local_lazy})) == 0
     end
 
     test "uses Registry instead" do
@@ -174,7 +170,7 @@ defmodule ExpirableStore.SingleNodeTest do
 
     test "does not use pg groups" do
       {:ok, _, _} = TestExpirables.fetch(:local_eager)
-      assert :pg.get_members(:expirable_store, {TestExpirables, :local_eager}) == []
+      assert length(:pg.get_members(:expirable_store, {TestExpirables, :local_eager})) == 0
     end
 
     test "clear stops eager refresh" do

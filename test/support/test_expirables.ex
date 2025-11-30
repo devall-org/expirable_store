@@ -8,8 +8,9 @@ defmodule TestExpirables do
 
   expirable :cluster_lazy do
     fetch fn ->
-      if pid = Process.whereis(:fetch_tracker) do
-        send(pid, {:fetch, :cluster_lazy, node()})
+      case :global.whereis_name(:fetch_tracker) do
+        pid when is_pid(pid) -> send(pid, {:fetch, :cluster_lazy, node()})
+        _ -> :ok
       end
 
       token = "cluster_lazy_#{:rand.uniform(10000)}"
@@ -23,8 +24,9 @@ defmodule TestExpirables do
 
   expirable :cluster_lazy_fail do
     fetch fn ->
-      if pid = Process.whereis(:fetch_tracker) do
-        send(pid, {:fetch, :cluster_lazy_fail, node()})
+      case :global.whereis_name(:fetch_tracker) do
+        pid when is_pid(pid) -> send(pid, {:fetch, :cluster_lazy_fail, node()})
+        _ -> :ok
       end
 
       :error
@@ -40,8 +42,9 @@ defmodule TestExpirables do
 
   expirable :cluster_eager do
     fetch fn ->
-      if pid = Process.whereis(:fetch_tracker) do
-        send(pid, {:fetch, :cluster_eager, node()})
+      case :global.whereis_name(:fetch_tracker) do
+        pid when is_pid(pid) -> send(pid, {:fetch, :cluster_eager, node()})
+        _ -> :ok
       end
 
       token = "cluster_eager_#{:rand.uniform(10000)}"
@@ -59,8 +62,9 @@ defmodule TestExpirables do
 
   expirable :local_lazy do
     fetch fn ->
-      if pid = Process.whereis(:fetch_tracker) do
-        send(pid, {:fetch, :local_lazy, node()})
+      case :global.whereis_name(:fetch_tracker) do
+        pid when is_pid(pid) -> send(pid, {:fetch, :local_lazy, node()})
+        _ -> :ok
       end
 
       token = "local_lazy_#{:rand.uniform(10000)}_#{node()}"
@@ -78,8 +82,9 @@ defmodule TestExpirables do
 
   expirable :local_eager do
     fetch fn ->
-      if pid = Process.whereis(:fetch_tracker) do
-        send(pid, {:fetch, :local_eager, node()})
+      case :global.whereis_name(:fetch_tracker) do
+        pid when is_pid(pid) -> send(pid, {:fetch, :local_eager, node()})
+        _ -> :ok
       end
 
       token = "local_eager_#{:rand.uniform(10000)}"

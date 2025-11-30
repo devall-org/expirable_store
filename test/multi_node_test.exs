@@ -6,9 +6,11 @@ defmodule ExpirableStore.MultiNodeTest do
   setup do
     nodes = ClusterHelper.start_nodes([:node2])
     [{_pid2, node2}] = nodes
+    :yes = :global.register_name(:fetch_tracker, self())
 
     on_exit(fn ->
       TestExpirables.clear_all()
+      :global.unregister_name(:fetch_tracker)
       ClusterHelper.stop_nodes(nodes)
     end)
 
@@ -40,13 +42,13 @@ defmodule ExpirableStore.MultiNodeTest do
     test "each node has local replica via :pg", %{node2: node2} do
       group = {TestExpirables, :cluster_lazy}
 
-      assert :pg.get_local_members(:expirable_store, group) == []
-      assert :erpc.call(node2, :pg, :get_local_members, [:expirable_store, group]) == []
+      assert length(:pg.get_local_members(:expirable_store, group)) == 0
+      assert length(:erpc.call(node2, :pg, :get_local_members, [:expirable_store, group])) == 0
 
       {:ok, _, _} = TestExpirables.fetch(:cluster_lazy)
 
       assert length(:pg.get_local_members(:expirable_store, group)) == 1
-      assert :erpc.call(node2, :pg, :get_local_members, [:expirable_store, group]) == []
+      assert length(:erpc.call(node2, :pg, :get_local_members, [:expirable_store, group])) == 0
 
       :erpc.call(node2, TestExpirables, :fetch, [:cluster_lazy])
 
@@ -56,8 +58,6 @@ defmodule ExpirableStore.MultiNodeTest do
     end
 
     test "concurrent updates are safe", %{node2: node2} do
-      Process.register(self(), :fetch_tracker)
-
       {:ok, _, _} = TestExpirables.fetch(:cluster_lazy)
       assert_receive {:fetch, :cluster_lazy, _}, 100
 
@@ -71,10 +71,9 @@ defmodule ExpirableStore.MultiNodeTest do
 
       assert token1 == token2
 
+      # Only one fetch should have been called (from either node)
       assert_receive {:fetch, :cluster_lazy, _}, 100
       refute_receive {:fetch, :cluster_lazy, _}, 100
-
-      Process.unregister(:fetch_tracker)
     end
   end
 
@@ -90,8 +89,6 @@ defmodule ExpirableStore.MultiNodeTest do
     end
 
     test "eager refresh updates all replicas", %{node2: node2} do
-      Process.register(self(), :fetch_tracker)
-
       {:ok, token1, _} = TestExpirables.fetch(:cluster_eager)
       assert_receive {:fetch, :cluster_eager, _}
 
@@ -107,8 +104,6 @@ defmodule ExpirableStore.MultiNodeTest do
       {:ok, token3, _} = :erpc.call(node2, TestExpirables, :fetch, [:cluster_eager])
       assert token2 != token1
       assert token2 == token3
-
-      Process.unregister(:fetch_tracker)
     end
   end
 
@@ -142,7 +137,7 @@ defmodule ExpirableStore.MultiNodeTest do
       {:ok, _, _} = TestExpirables.fetch(:local_lazy)
       {:ok, _, _} = :erpc.call(node2, TestExpirables, :fetch, [:local_lazy])
 
-      assert :pg.get_members(:expirable_store, {TestExpirables, :local_lazy}) == []
+      assert length(:pg.get_members(:expirable_store, {TestExpirables, :local_lazy})) == 0
     end
   end
 
@@ -159,8 +154,6 @@ defmodule ExpirableStore.MultiNodeTest do
     end
 
     test "eager refresh works independently per node", %{node2: node2} do
-      Process.register(self(), :fetch_tracker)
-
       {:ok, token1, _} = TestExpirables.fetch(:local_eager)
       assert_receive {:fetch, :local_eager, _}
 
@@ -174,8 +167,6 @@ defmodule ExpirableStore.MultiNodeTest do
       # node2 should still get its own independent token
       {:ok, token3, _} = :erpc.call(node2, TestExpirables, :fetch, [:local_eager])
       assert token3 != token2
-
-      Process.unregister(:fetch_tracker)
     end
   end
 end
