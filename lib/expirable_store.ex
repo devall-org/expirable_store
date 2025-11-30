@@ -66,7 +66,7 @@ defmodule ExpirableStore do
   defp fetch_cluster(module, name, fetch_fn, refresh) do
     group = {module, name}
 
-    case get_local_agent(group) do
+    case get_cluster_agent(group) do
       nil ->
         acquire_lock_and_fetch_cluster(group, fetch_fn, refresh)
 
@@ -91,7 +91,7 @@ defmodule ExpirableStore do
 
   defp acquire_lock_and_fetch_cluster(group, fetch_fn, refresh) do
     :global.trans(group, fn ->
-      case get_local_agent(group) do
+      case get_cluster_agent(group) do
         nil ->
           local_pid = create_cluster_agent(group, fetch_fn, refresh)
           Agent.get(local_pid, & &1)
@@ -101,15 +101,15 @@ defmodule ExpirableStore do
             case Agent.get(local_pid, & &1) do
               :error ->
                 new_entry = fetch_fn.()
-                update_all_members(group, new_entry)
-                schedule_eager_refresh(group, new_entry, fetch_fn, refresh)
+                update_all_cluster_members(group, new_entry)
+                schedule_eager_refresh_cluster(group, new_entry, fetch_fn, refresh)
                 new_entry
 
               {:ok, _, expires_at} = entry ->
                 if expired?(expires_at) do
                   new_entry = fetch_fn.()
-                  update_all_members(group, new_entry)
-                  schedule_eager_refresh(group, new_entry, fetch_fn, refresh)
+                  update_all_cluster_members(group, new_entry)
+                  schedule_eager_refresh_cluster(group, new_entry, fetch_fn, refresh)
                   new_entry
                 else
                   entry
@@ -128,7 +128,7 @@ defmodule ExpirableStore do
 
     :global.trans(group, fn ->
       group
-      |> get_all_agents()
+      |> get_all_cluster_agents()
       |> Enum.each(fn pid ->
         try do
           Agent.stop(pid)
@@ -139,12 +139,12 @@ defmodule ExpirableStore do
     end)
   end
 
-  defp get_local_agent(group) do
+  defp get_cluster_agent(group) do
     :pg.get_local_members(:expirable_store, group)
     |> List.first()
   end
 
-  defp get_all_agents(group) do
+  defp get_all_cluster_agents(group) do
     :pg.get_members(:expirable_store, group)
   end
 
@@ -159,7 +159,7 @@ defmodule ExpirableStore do
       end
 
     spec = %{
-      id: group,
+      id: {:cluster, group},
       start: {Agent, :start_link, [fn -> initial_value end]},
       restart: :temporary
     }
@@ -167,68 +167,111 @@ defmodule ExpirableStore do
     {:ok, pid} = DynamicSupervisor.start_child(ExpirableStore.Supervisor, spec)
     :ok = :pg.join(:expirable_store, group, pid)
 
-    schedule_eager_refresh(group, initial_value, fetch_fn, refresh)
+    schedule_eager_refresh_cluster(group, initial_value, fetch_fn, refresh)
 
     pid
   end
 
-  defp update_all_members(group, new_entry) do
+  defp update_all_cluster_members(group, new_entry) do
     group
-    |> get_all_agents()
+    |> get_all_cluster_agents()
     |> Enum.each(fn pid ->
       Agent.update(pid, fn _ -> new_entry end)
     end)
   end
 
   # ===========================================================================
-  # Local-scoped implementation
+  # Local-scoped implementation (using Agent + Registry)
   # ===========================================================================
 
   defp fetch_local(module, name, fetch_fn, refresh) do
     key = {module, name}
 
-    case :ets.lookup(:expirable_store_local, key) do
-      [] ->
-        do_fetch_local(key, fetch_fn, refresh)
+    case get_local_agent(key) do
+      nil ->
+        create_and_fetch_local(key, fetch_fn, refresh)
 
-      [{^key, :error}] ->
-        do_fetch_local(key, fetch_fn, refresh)
+      local_pid ->
+        if Process.alive?(local_pid) do
+          case Agent.get(local_pid, & &1) do
+            :error ->
+              refetch_local(local_pid, key, fetch_fn, refresh)
 
-      [{^key, {:ok, _value, expires_at} = entry}] ->
-        if expired?(expires_at) do
-          do_fetch_local(key, fetch_fn, refresh)
+            {:ok, _, expires_at} = entry ->
+              if expired?(expires_at) do
+                refetch_local(local_pid, key, fetch_fn, refresh)
+              else
+                entry
+              end
+          end
         else
-          entry
+          create_and_fetch_local(key, fetch_fn, refresh)
         end
     end
   end
 
-  defp do_fetch_local(key, fetch_fn, refresh) do
-    entry = fetch_fn.()
-    :ets.insert(:expirable_store_local, {key, entry})
-    schedule_eager_refresh_local(key, entry, fetch_fn, refresh)
-    entry
+  defp create_and_fetch_local(key, fetch_fn, refresh) do
+    initial_value = fetch_fn.()
+
+    spec = %{
+      id: {:local, key},
+      start:
+        {Agent, :start_link,
+         [fn -> initial_value end, [name: {:via, Registry, {ExpirableStore.LocalRegistry, key}}]]},
+      restart: :temporary
+    }
+
+    {:ok, pid} = DynamicSupervisor.start_child(ExpirableStore.Supervisor, spec)
+
+    schedule_eager_refresh_local(key, initial_value, fetch_fn, refresh)
+
+    Agent.get(pid, & &1)
+  end
+
+  defp refetch_local(pid, key, fetch_fn, refresh) do
+    new_entry = fetch_fn.()
+    Agent.update(pid, fn _ -> new_entry end)
+    schedule_eager_refresh_local(key, new_entry, fetch_fn, refresh)
+    new_entry
+  end
+
+  defp get_local_agent(key) do
+    case Registry.lookup(ExpirableStore.LocalRegistry, key) do
+      [{pid, _}] -> pid
+      [] -> nil
+    end
   end
 
   defp clear_local(module, name) do
     key = {module, name}
-    :ets.delete(:expirable_store_local, key)
+
+    case get_local_agent(key) do
+      nil ->
+        :ok
+
+      pid ->
+        try do
+          Agent.stop(pid)
+        catch
+          _, _ -> :ok
+        end
+    end
+
     :ok
   end
 
   # ===========================================================================
-  # Eager refresh scheduling
+  # Eager refresh scheduling (cluster)
   # ===========================================================================
 
-  defp schedule_eager_refresh(_group, :error, _fetch_fn, _refresh), do: :ok
-  defp schedule_eager_refresh(_group, _entry, _fetch_fn, :lazy), do: :ok
+  defp schedule_eager_refresh_cluster(_group, :error, _fetch_fn, _refresh), do: :ok
+  defp schedule_eager_refresh_cluster(_group, _entry, _fetch_fn, :lazy), do: :ok
 
-  defp schedule_eager_refresh(group, {:ok, _value, expires_at}, fetch_fn, :eager) do
+  defp schedule_eager_refresh_cluster(group, {:ok, _value, expires_at}, fetch_fn, :eager) do
     now = System.system_time(:millisecond)
     ttl = expires_at - now
 
     if ttl > 0 do
-      # Schedule refresh at 90% of TTL (i.e., 10% before expiry)
       refresh_delay = trunc(ttl * 0.9)
 
       if refresh_delay > 0 do
@@ -244,19 +287,23 @@ defmodule ExpirableStore do
 
   defp do_eager_refresh_cluster(group, fetch_fn) do
     :global.trans(group, fn ->
-      case get_local_agent(group) do
+      case get_cluster_agent(group) do
         nil ->
           :ok
 
         local_pid ->
           if Process.alive?(local_pid) do
             new_entry = fetch_fn.()
-            update_all_members(group, new_entry)
-            schedule_eager_refresh(group, new_entry, fetch_fn, :eager)
+            update_all_cluster_members(group, new_entry)
+            schedule_eager_refresh_cluster(group, new_entry, fetch_fn, :eager)
           end
       end
     end)
   end
+
+  # ===========================================================================
+  # Eager refresh scheduling (local)
+  # ===========================================================================
 
   defp schedule_eager_refresh_local(_key, :error, _fetch_fn, _refresh), do: :ok
   defp schedule_eager_refresh_local(_key, _entry, _fetch_fn, :lazy), do: :ok
@@ -280,9 +327,17 @@ defmodule ExpirableStore do
   end
 
   defp do_eager_refresh_local(key, fetch_fn) do
-    new_entry = fetch_fn.()
-    :ets.insert(:expirable_store_local, {key, new_entry})
-    schedule_eager_refresh_local(key, new_entry, fetch_fn, :eager)
+    case get_local_agent(key) do
+      nil ->
+        :ok
+
+      pid ->
+        if Process.alive?(pid) do
+          new_entry = fetch_fn.()
+          Agent.update(pid, fn _ -> new_entry end)
+          schedule_eager_refresh_local(key, new_entry, fetch_fn, :eager)
+        end
+    end
   end
 
   # ===========================================================================

@@ -5,14 +5,12 @@ defmodule ExpirableStore.Application do
 
   @impl true
   def start(_type, _args) do
-    # Create ETS table for local-scoped expirables
-    :ets.new(:expirable_store_local, [:named_table, :public, :set])
-
     children = [
       %{
         id: :pg,
         start: {:pg, :start_link, [:expirable_store]}
       },
+      {Registry, keys: :unique, name: ExpirableStore.LocalRegistry},
       {DynamicSupervisor, name: ExpirableStore.Supervisor, strategy: :one_for_one}
     ]
 

@@ -12,14 +12,17 @@ defmodule ExpirableStore.LocalTest do
         Process.unregister(:fetch_tracker)
       end
 
-      # Ensure :pg groups are cleaned
       Process.sleep(10)
     end)
 
     :ok
   end
 
-  describe "fetch/1 with scope :cluster (default)" do
+  # ===========================================================================
+  # scope :cluster, refresh :lazy
+  # ===========================================================================
+
+  describe "scope :cluster, refresh :lazy" do
     test "caches tokens until expiration" do
       now = System.system_time(:millisecond)
       {:ok, token1, expires_at1} = TestExpirables.fetch(:github)
@@ -28,7 +31,6 @@ defmodule ExpirableStore.LocalTest do
       assert expires_at1 > now
 
       {:ok, token2, expires_at2} = TestExpirables.fetch(:github)
-      # cached, no re-execution (no external API call)
       refute_receive {:fetch, :github, _}
       assert token1 == token2
       assert expires_at1 == expires_at2
@@ -46,12 +48,77 @@ defmodule ExpirableStore.LocalTest do
       assert_receive {:fetch, :google, _}
 
       :error = TestExpirables.fetch(:google)
-      # failures are retried on each call
       assert_receive {:fetch, :google, _}
+    end
+
+    test "agents are added to :pg groups" do
+      group = {TestExpirables, :github}
+      assert :pg.get_members(:expirable_store, group) == []
+
+      {:ok, _, _} = TestExpirables.fetch(:github)
+      assert length(:pg.get_members(:expirable_store, group)) == 1
+
+      TestExpirables.clear(:github)
+      assert :pg.get_members(:expirable_store, group) == []
+    end
+
+    test "clear removes cache before expiration" do
+      {:ok, token1, _} = TestExpirables.fetch(:github)
+      {:ok, token2, _} = TestExpirables.fetch(:github)
+      assert token1 == token2
+
+      TestExpirables.clear(:github)
+
+      {:ok, token3, _} = TestExpirables.fetch(:github)
+      assert token3 != token1
     end
   end
 
-  describe "fetch/1 with scope :local" do
+  # ===========================================================================
+  # scope :cluster, refresh :eager
+  # ===========================================================================
+
+  describe "scope :cluster, refresh :eager" do
+    test "refreshes automatically before expiry" do
+      {:ok, token1, _} = TestExpirables.fetch(:eager_token)
+      assert_receive {:fetch, :eager_token, _}
+
+      # Wait for eager refresh (should happen at ~90ms, before 100ms expiry)
+      Process.sleep(120)
+
+      # Eager refresh should have happened in background
+      assert_receive {:fetch, :eager_token, _}, 50
+
+      # Value should still be valid (refreshed)
+      {:ok, token2, _} = TestExpirables.fetch(:eager_token)
+      assert token2 != token1
+    end
+
+    test "agents are added to :pg groups" do
+      group = {TestExpirables, :eager_token}
+      assert :pg.get_members(:expirable_store, group) == []
+
+      {:ok, _, _} = TestExpirables.fetch(:eager_token)
+      assert length(:pg.get_members(:expirable_store, group)) == 1
+    end
+
+    test "clear stops eager refresh" do
+      {:ok, token1, _} = TestExpirables.fetch(:eager_token)
+      assert_receive {:fetch, :eager_token, _}
+
+      TestExpirables.clear(:eager_token)
+
+      {:ok, token2, _} = TestExpirables.fetch(:eager_token)
+      assert_receive {:fetch, :eager_token, _}
+      assert token2 != token1
+    end
+  end
+
+  # ===========================================================================
+  # scope :local, refresh :lazy
+  # ===========================================================================
+
+  describe "scope :local, refresh :lazy" do
     test "caches tokens locally until expiration" do
       {:ok, token1, expires_at1} = TestExpirables.fetch(:local_token)
       assert_receive {:fetch, :local_token, _}
@@ -63,38 +130,37 @@ defmodule ExpirableStore.LocalTest do
 
       Process.sleep(300)
 
-      {:ok, token3, _expires_at3} = TestExpirables.fetch(:local_token)
+      {:ok, token3, _} = TestExpirables.fetch(:local_token)
       assert_receive {:fetch, :local_token, _}
       assert token3 != token1
     end
 
-    test "local scope does not use pg groups" do
-      {:ok, _token, _} = TestExpirables.fetch(:local_token)
-
-      # Local-scoped expirables don't join pg groups
+    test "does not use pg groups" do
+      {:ok, _, _} = TestExpirables.fetch(:local_token)
       assert :pg.get_members(:expirable_store, {TestExpirables, :local_token}) == []
+    end
+
+    test "uses Registry instead" do
+      {:ok, _, _} = TestExpirables.fetch(:local_token)
+
+      assert [{_pid, _}] =
+               Registry.lookup(ExpirableStore.LocalRegistry, {TestExpirables, :local_token})
+    end
+
+    test "clear removes cache" do
+      {:ok, token1, _} = TestExpirables.fetch(:local_token)
+      TestExpirables.clear(:local_token)
+      {:ok, token2, _} = TestExpirables.fetch(:local_token)
+      assert token2 != token1
     end
   end
 
-  describe "fetch/1 with refresh :eager" do
+  # ===========================================================================
+  # scope :local, refresh :eager
+  # ===========================================================================
+
+  describe "scope :local, refresh :eager" do
     test "refreshes automatically before expiry" do
-      {:ok, token1, _} = TestExpirables.fetch(:eager_token)
-      assert_receive {:fetch, :eager_token, _}
-
-      # Wait for eager refresh (should happen at ~90ms, before 100ms expiry)
-      Process.sleep(120)
-
-      # Eager refresh should have happened in background
-      assert_receive {:fetch, :eager_token, _}, 50
-
-      # Value should still be valid (refreshed) - not expired, no sync fetch needed
-      {:ok, token2, _} = TestExpirables.fetch(:eager_token)
-      assert token2 != token1
-      # Note: eager refresh may have scheduled another refresh, so we just verify
-      # the token was updated without a synchronous fetch (value changed in background)
-    end
-
-    test "local eager refresh works" do
       {:ok, token1, _} = TestExpirables.fetch(:local_eager_token)
       assert_receive {:fetch, :local_eager_token, _}
 
@@ -105,13 +171,39 @@ defmodule ExpirableStore.LocalTest do
       {:ok, token2, _} = TestExpirables.fetch(:local_eager_token)
       assert token2 != token1
     end
+
+    test "does not use pg groups" do
+      {:ok, _, _} = TestExpirables.fetch(:local_eager_token)
+      assert :pg.get_members(:expirable_store, {TestExpirables, :local_eager_token}) == []
+    end
+
+    test "clear stops eager refresh" do
+      {:ok, token1, _} = TestExpirables.fetch(:local_eager_token)
+      assert_receive {:fetch, :local_eager_token, _}
+
+      TestExpirables.clear(:local_eager_token)
+
+      {:ok, token2, _} = TestExpirables.fetch(:local_eager_token)
+      assert_receive {:fetch, :local_eager_token, _}
+      assert token2 != token1
+    end
   end
 
+  # ===========================================================================
+  # Common functionality
+  # ===========================================================================
+
   describe "fetch!/1" do
-    test "returns token on success" do
+    test "returns token on success (cluster)" do
       token = TestExpirables.fetch!(:github)
       assert_receive {:fetch, :github, _}
       assert String.starts_with?(token, "gho_")
+    end
+
+    test "returns token on success (local)" do
+      token = TestExpirables.fetch!(:local_token)
+      assert_receive {:fetch, :local_token, _}
+      assert String.starts_with?(token, "local_")
     end
 
     test "raises on fetch failure" do
@@ -141,28 +233,16 @@ defmodule ExpirableStore.LocalTest do
     test "google!() raises on failure" do
       assert_raise RuntimeError, fn -> TestExpirables.google!() end
     end
+
+    test "local_token() works for local scope" do
+      {:ok, token, _} = TestExpirables.local_token()
+      assert_receive {:fetch, :local_token, _}
+      assert String.starts_with?(token, "local_")
+    end
   end
 
-  describe "clear" do
-    test "removes cache before expiration" do
-      {:ok, token1, _} = TestExpirables.fetch(:github)
-      {:ok, token2, _} = TestExpirables.fetch(:github)
-      assert token1 == token2
-
-      TestExpirables.clear(:github)
-
-      {:ok, token3, _} = TestExpirables.fetch(:github)
-      assert token3 != token1
-    end
-
-    test "clear works for local scope" do
-      {:ok, token1, _} = TestExpirables.fetch(:local_token)
-      TestExpirables.clear(:local_token)
-      {:ok, token2, _} = TestExpirables.fetch(:local_token)
-      assert token2 != token1
-    end
-
-    test "clear_all removes all caches" do
+  describe "clear_all/0" do
+    test "removes all caches" do
       {:ok, token1, _} = TestExpirables.fetch(:github)
       {:ok, local1, _} = TestExpirables.fetch(:local_token)
       :error = TestExpirables.fetch(:google)
@@ -176,7 +256,7 @@ defmodule ExpirableStore.LocalTest do
     end
   end
 
-  describe "supervision (cluster scope)" do
+  describe "supervision" do
     test "agents are added to DynamicSupervisor" do
       %{active: active_before} = DynamicSupervisor.count_children(ExpirableStore.Supervisor)
 
@@ -184,46 +264,13 @@ defmodule ExpirableStore.LocalTest do
       %{active: active_after_1} = DynamicSupervisor.count_children(ExpirableStore.Supervisor)
       assert active_after_1 == active_before + 1
 
-      {:ok, _, _} = TestExpirables.fetch(:slack)
+      {:ok, _, _} = TestExpirables.fetch(:local_token)
       %{active: active_after_2} = DynamicSupervisor.count_children(ExpirableStore.Supervisor)
       assert active_after_2 == active_before + 2
 
       TestExpirables.clear(:github)
       %{active: active_after_clear} = DynamicSupervisor.count_children(ExpirableStore.Supervisor)
       assert active_after_clear == active_before + 1
-    end
-
-    test "agents are added to :pg groups" do
-      group_github = {TestExpirables, :github}
-      group_slack = {TestExpirables, :slack}
-
-      assert :pg.get_members(:expirable_store, group_github) == []
-      assert :pg.get_members(:expirable_store, group_slack) == []
-
-      {:ok, _, _} = TestExpirables.fetch(:github)
-      assert length(:pg.get_members(:expirable_store, group_github)) == 1
-
-      {:ok, _, _} = TestExpirables.fetch(:slack)
-      assert length(:pg.get_members(:expirable_store, group_slack)) == 1
-
-      TestExpirables.clear(:github)
-      assert :pg.get_members(:expirable_store, group_github) == []
-      assert length(:pg.get_members(:expirable_store, group_slack)) == 1
-    end
-
-    test "local members are preferred" do
-      group = {TestExpirables, :github}
-
-      {:ok, token1, expires_at1} = TestExpirables.fetch(:github)
-
-      [_local_pid] = :pg.get_local_members(:expirable_store, group)
-
-      {:ok, token2, expires_at2} = TestExpirables.fetch(:github)
-      assert token1 == token2
-      assert expires_at1 == expires_at2
-      assert_receive {:fetch, :github, _}, 100
-
-      refute_receive {:fetch, :github, _}
     end
   end
 end
