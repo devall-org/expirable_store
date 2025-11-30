@@ -147,14 +147,14 @@ Additionally, generic functions are available:
 ### Running Tests
 
 ```bash
-# Run all tests (includes cluster tests)
+# Run all tests (includes multi-node tests)
 elixir --sname test -S mix test
 
-# Run only local tests (no cluster)
-mix test --exclude cluster
+# Run only single-node tests
+mix test --exclude multi_node
 
-# Run only cluster tests
-elixir --sname test -S mix test --only cluster
+# Run only multi-node tests
+elixir --sname test -S mix test --only multi_node
 ```
 
-Cluster tests automatically start a local Erlang cluster using `:peer` to verify replication and synchronization across multiple nodes.
+Multi-node tests automatically start a local Erlang cluster using `:peer` to verify replication and synchronization across multiple nodes.

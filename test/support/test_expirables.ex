@@ -2,67 +2,49 @@ defmodule TestExpirables do
   @moduledoc false
   use ExpirableStore
 
-  # Cluster-scoped, lazy refresh (default)
-  expirable :github do
+  # ===========================================
+  # scope :cluster, refresh :lazy
+  # ===========================================
+
+  expirable :cluster_lazy do
     fetch fn ->
       if pid = Process.whereis(:fetch_tracker) do
-        send(pid, {:fetch, :github, node()})
+        send(pid, {:fetch, :cluster_lazy, node()})
       end
 
-      token = "gho_#{:rand.uniform(10000)}"
+      token = "cluster_lazy_#{:rand.uniform(10000)}"
       expires_at = System.system_time(:millisecond) + 200
       {:ok, token, expires_at}
     end
+
+    refresh :lazy
+    scope :cluster
   end
 
-  # Always fails
-  expirable :google do
+  expirable :cluster_lazy_fail do
     fetch fn ->
       if pid = Process.whereis(:fetch_tracker) do
-        send(pid, {:fetch, :google, node()})
+        send(pid, {:fetch, :cluster_lazy_fail, node()})
       end
 
       :error
     end
+
+    refresh :lazy
+    scope :cluster
   end
 
-  # Cluster-scoped, lazy refresh
-  expirable :slack do
+  # ===========================================
+  # scope :cluster, refresh :eager
+  # ===========================================
+
+  expirable :cluster_eager do
     fetch fn ->
       if pid = Process.whereis(:fetch_tracker) do
-        send(pid, {:fetch, :slack, node()})
+        send(pid, {:fetch, :cluster_eager, node()})
       end
 
-      token = "xoxb_#{:rand.uniform(10000)}"
-      expires_at = System.system_time(:millisecond) + :timer.hours(1)
-      {:ok, token, expires_at}
-    end
-  end
-
-  # Local-scoped, lazy refresh
-  expirable :local_token do
-    fetch fn ->
-      if pid = Process.whereis(:fetch_tracker) do
-        send(pid, {:fetch, :local_token, node()})
-      end
-
-      token = "local_#{:rand.uniform(10000)}_#{node()}"
-      expires_at = System.system_time(:millisecond) + 200
-      {:ok, token, expires_at}
-    end
-
-    scope :local
-  end
-
-  # Cluster-scoped, eager refresh
-  expirable :eager_token do
-    fetch fn ->
-      if pid = Process.whereis(:fetch_tracker) do
-        send(pid, {:fetch, :eager_token, node()})
-      end
-
-      token = "eager_#{:rand.uniform(10000)}"
-      # Short TTL for testing eager refresh (100ms, so eager refresh at 90ms)
+      token = "cluster_eager_#{:rand.uniform(10000)}"
       expires_at = System.system_time(:millisecond) + 100
       {:ok, token, expires_at}
     end
@@ -71,11 +53,33 @@ defmodule TestExpirables do
     scope :cluster
   end
 
-  # Local-scoped, eager refresh
-  expirable :local_eager_token do
+  # ===========================================
+  # scope :local, refresh :lazy
+  # ===========================================
+
+  expirable :local_lazy do
     fetch fn ->
       if pid = Process.whereis(:fetch_tracker) do
-        send(pid, {:fetch, :local_eager_token, node()})
+        send(pid, {:fetch, :local_lazy, node()})
+      end
+
+      token = "local_lazy_#{:rand.uniform(10000)}_#{node()}"
+      expires_at = System.system_time(:millisecond) + 200
+      {:ok, token, expires_at}
+    end
+
+    refresh :lazy
+    scope :local
+  end
+
+  # ===========================================
+  # scope :local, refresh :eager
+  # ===========================================
+
+  expirable :local_eager do
+    fetch fn ->
+      if pid = Process.whereis(:fetch_tracker) do
+        send(pid, {:fetch, :local_eager, node()})
       end
 
       token = "local_eager_#{:rand.uniform(10000)}"
