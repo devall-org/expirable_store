@@ -17,7 +17,7 @@ Perfect for caching OAuth tokens, API keys, and other time-sensitive data that s
 
 ```elixir
 def deps do
-  [{:expirable_store, "~> 0.4.1"}]
+  [{:expirable_store, "~> 0.4.2"}]
 end
 ```
 
@@ -48,6 +48,13 @@ defmodule MyApp.Expirables do
     scope :cluster
     refresh {:eager, before_expiry: :timer.seconds(30)}
   end
+
+  # Never expires (cached forever until clear)
+  expirable :static_config do
+    fetch fn ->
+      {:ok, load_config(), :infinity}
+    end
+  end
 end
 ```
 
@@ -75,7 +82,7 @@ Define an expirable value with the following options:
 
 | Option | Values | Default | Description |
 |--------|--------|---------|-------------|
-| `fetch` | `fn -> {:ok, value, expires_at} \| :error end` | *required* | Function to fetch the value |
+| `fetch` | `fn -> {:ok, value, expires_at} \| :error end` | *required* | Function to fetch the value. `expires_at` is Unix timestamp in ms, or `:infinity` |
 | `refresh` | `:lazy`, `{:eager, before_expiry: ms}` | `:lazy` | Refresh strategy |
 | `scope` | `:cluster`, `:local` | `:cluster` | Scope of the store |
 
@@ -83,6 +90,18 @@ Define an expirable value with the following options:
 
 - **`:lazy`** (default): Refresh on next fetch after expiry
 - **`{:eager, before_expiry: ms}`**: Background refresh `ms` milliseconds before expiry
+
+### Never Expiring Values
+
+Return `:infinity` as `expires_at` to cache a value forever (until explicitly cleared):
+
+```elixir
+expirable :static_config do
+  fetch fn ->
+    {:ok, load_config(), :infinity}
+  end
+end
+```
 
 ### Scope Options
 
@@ -123,8 +142,9 @@ This library is optimized for **lightweight data** like:
 expirable :name do
   fetch fn ->
     # Must return {:ok, value, expires_at} or :error
-    # expires_at is Unix timestamp in milliseconds
+    # expires_at is Unix timestamp in milliseconds, or :infinity
     {:ok, value, System.system_time(:millisecond) + ttl_ms}
+    # or {:ok, value, :infinity} for never-expiring values
   end
 
   scope :cluster   # or :local

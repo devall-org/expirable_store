@@ -162,6 +162,7 @@ defmodule ExpirableStore.Store do
 
   defp schedule_eager_refresh(_group, :error, _fetch_fn, _refresh, _scope), do: :ok
   defp schedule_eager_refresh(_group, _entry, _fetch_fn, :lazy, _scope), do: :ok
+  defp schedule_eager_refresh(_group, {:ok, _, :infinity}, _fetch_fn, _refresh, _scope), do: :ok
 
   defp schedule_eager_refresh(group, {:ok, _value, expires_at}, fetch_fn, {:eager, opts}, scope) do
     before_ms = Keyword.fetch!(opts, :before_expiry)
@@ -196,6 +197,8 @@ defmodule ExpirableStore.Store do
   # ===========================================================================
   # Helpers
   # ===========================================================================
+
+  defp expired?(:infinity), do: false
 
   defp expired?(expires_at) do
     System.system_time(:millisecond) > expires_at

@@ -17,7 +17,8 @@ defmodule ExpirableStore.Dsl do
       fetch: [
         type: {:fun, 0},
         required: true,
-        doc: "Function that returns {:ok, value, expires_at} or :error"
+        doc:
+          "Function that returns {:ok, value, expires_at} or :error. expires_at is Unix timestamp in milliseconds, or :infinity for values that never expire."
       ],
       refresh: [
         type:

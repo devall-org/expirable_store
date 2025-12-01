@@ -100,4 +100,40 @@ defmodule TestExpirables do
     refresh {:eager, before_expiry: 20}
     scope :local
   end
+
+  # ===========================================
+  # expires_at :infinity (never expires)
+  # ===========================================
+
+  expirable :never_expires do
+    fetch fn ->
+      case :global.whereis_name(:fetch_tracker) do
+        pid when is_pid(pid) -> send(pid, {:fetch, :never_expires, node()})
+        _ -> :ok
+      end
+
+      Process.sleep(50)
+      token = "never_expires_#{:rand.uniform(10000)}"
+      {:ok, token, :infinity}
+    end
+
+    refresh :lazy
+    scope :cluster
+  end
+
+  expirable :never_expires_eager do
+    fetch fn ->
+      case :global.whereis_name(:fetch_tracker) do
+        pid when is_pid(pid) -> send(pid, {:fetch, :never_expires_eager, node()})
+        _ -> :ok
+      end
+
+      Process.sleep(50)
+      token = "never_expires_eager_#{:rand.uniform(10000)}"
+      {:ok, token, :infinity}
+    end
+
+    refresh {:eager, before_expiry: 20}
+    scope :cluster
+  end
 end

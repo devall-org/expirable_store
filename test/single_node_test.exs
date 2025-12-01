@@ -250,6 +250,52 @@ defmodule ExpirableStore.SingleNodeTest do
     end
   end
 
+  # ===========================================================================
+  # expires_at :infinity (never expires)
+  # ===========================================================================
+
+  describe "expires_at :infinity" do
+    test "value never expires" do
+      {:ok, token1, :infinity} = TestExpirables.fetch(:never_expires)
+      assert_receive {:fetch, :never_expires, _}
+
+      # Wait longer than normal expiry time
+      Process.sleep(300)
+
+      # Should still return cached value without fetching
+      {:ok, token2, :infinity} = TestExpirables.fetch(:never_expires)
+      refute_receive {:fetch, :never_expires, _}
+      assert token1 == token2
+    end
+
+    test "clear still works" do
+      {:ok, token1, :infinity} = TestExpirables.fetch(:never_expires)
+      assert_receive {:fetch, :never_expires, _}
+
+      TestExpirables.clear(:never_expires)
+
+      {:ok, token2, :infinity} = TestExpirables.fetch(:never_expires)
+      assert_receive {:fetch, :never_expires, _}
+      assert token2 != token1
+    end
+
+    test "eager refresh is not scheduled for :infinity" do
+      {:ok, token1, :infinity} = TestExpirables.fetch(:never_expires_eager)
+      assert_receive {:fetch, :never_expires_eager, _}
+
+      # Wait for when eager refresh would normally happen
+      Process.sleep(300)
+
+      # No background refresh should occur
+      refute_receive {:fetch, :never_expires_eager, _}
+
+      # Value should be the same
+      {:ok, token2, :infinity} = TestExpirables.fetch(:never_expires_eager)
+      refute_receive {:fetch, :never_expires_eager, _}
+      assert token1 == token2
+    end
+  end
+
   describe "supervision" do
     test "agents are added to DynamicSupervisor" do
       %{active: active_before} = DynamicSupervisor.count_children(ExpirableStore.Supervisor)

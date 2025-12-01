@@ -47,13 +47,19 @@ MyApp.Expirables.clear_all()
 
 | Option | Values | Default | Description |
 |--------|--------|---------|-------------|
-| `fetch` | `fn -> {:ok, value, expires_at} \| :error end` | *required* | Function to fetch the value |
+| `fetch` | `fn -> {:ok, value, expires_at} \| :error end` | *required* | Function to fetch the value. `expires_at` is Unix timestamp in ms, or `:infinity` |
 | `refresh` | `:lazy`, `{:eager, before_expiry: ms}` | `:lazy` | Refresh strategy |
 | `scope` | `:cluster`, `:local` | `:cluster` | Scope of the store |
 
 ### Refresh Strategies
 - `:lazy` - Refresh on next fetch after expiry
 - `{:eager, before_expiry: ms}` - Background refresh `ms` milliseconds before expiry
+
+### Never Expiring Values
+Return `:infinity` as `expires_at` to cache forever:
+```elixir
+fetch fn -> {:ok, value, :infinity} end
+```
 
 ### Scope Options
 - `:cluster` - Replicated across all nodes via `:pg`
@@ -63,7 +69,7 @@ MyApp.Expirables.clear_all()
 
 - Success results (`{:ok, value, expires_at}`) are stored until expiration
 - Failure results (`:error`) are NEVER stored - fetch function is called on every attempt
-- `expires_at` must be Unix timestamp in milliseconds
+- `expires_at` must be Unix timestamp in milliseconds, or `:infinity` for values that never expire
 - Expirable names must be compile-time atoms defined in DSL, no dynamic keys
 
 ## When to Use
