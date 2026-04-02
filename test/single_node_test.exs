@@ -511,6 +511,111 @@ defmodule ExpirableStore.SingleNodeTest do
     end
   end
 
+  # ===========================================================================
+  # stateful fetch
+  # ===========================================================================
+
+  describe "stateful fetch" do
+    test "state is passed between fetch calls" do
+      {:ok, "stateful_counter_1", _} = TestExpirables.fetch(:stateful_counter)
+      assert_receive {:fetch, :stateful_counter, 1, _}
+
+      # Wait for expiration
+      Process.sleep(210)
+
+      {:ok, "stateful_counter_2", _} = TestExpirables.fetch(:stateful_counter)
+      assert_receive {:fetch, :stateful_counter, 2, _}
+    end
+
+    test "clear resets state to nil" do
+      {:ok, "stateful_counter_1", _} = TestExpirables.fetch(:stateful_counter)
+      assert_receive {:fetch, :stateful_counter, 1, _}
+
+      TestExpirables.clear(:stateful_counter)
+
+      {:ok, "stateful_counter_1", _} = TestExpirables.fetch(:stateful_counter)
+      assert_receive {:fetch, :stateful_counter, 1, _}
+    end
+  end
+
+  # ===========================================================================
+  # require_init
+  # ===========================================================================
+
+  describe "require_init (non-keyed)" do
+    test "fetch returns :error before init" do
+      :error = TestExpirables.fetch(:require_init_example)
+    end
+
+    test "fetch works after init" do
+      TestExpirables.init(:require_init_example, %{token_prefix: "hello"})
+
+      {:ok, token, _} = TestExpirables.fetch(:require_init_example)
+      assert_receive {:fetch, :require_init_example, %{token_prefix: "hello"}, _}
+      assert String.starts_with?(token, "require_init_hello_")
+    end
+
+    test "named init function works" do
+      TestExpirables.init_require_init_example(%{token_prefix: "named"})
+
+      {:ok, token, _} = TestExpirables.fetch(:require_init_example)
+      assert String.starts_with?(token, "require_init_named_")
+    end
+
+    test "clear requires re-init" do
+      TestExpirables.init(:require_init_example, %{token_prefix: "abc"})
+      {:ok, _, _} = TestExpirables.fetch(:require_init_example)
+
+      TestExpirables.clear(:require_init_example)
+
+      :error = TestExpirables.fetch(:require_init_example)
+    end
+  end
+
+  describe "require_init (keyed)" do
+    test "fetch returns :error before init" do
+      :error = TestExpirables.fetch(:require_init_keyed, "k1")
+    end
+
+    test "fetch works after init" do
+      TestExpirables.init(:require_init_keyed, "k1", %{token_prefix: "hello"})
+
+      {:ok, token, _} = TestExpirables.fetch(:require_init_keyed, "k1")
+      assert_receive {:fetch, :require_init_keyed, "k1", %{token_prefix: "hello"}, _}
+      assert String.starts_with?(token, "require_init_keyed_k1_hello_")
+    end
+
+    test "different keys are independent" do
+      TestExpirables.init(:require_init_keyed, "k1", %{token_prefix: "one"})
+      TestExpirables.init(:require_init_keyed, "k2", %{token_prefix: "two"})
+
+      {:ok, t1, _} = TestExpirables.fetch(:require_init_keyed, "k1")
+      {:ok, t2, _} = TestExpirables.fetch(:require_init_keyed, "k2")
+
+      assert String.starts_with?(t1, "require_init_keyed_k1_one_")
+      assert String.starts_with?(t2, "require_init_keyed_k2_two_")
+
+      # uninit key still fails
+      :error = TestExpirables.fetch(:require_init_keyed, "k3")
+    end
+
+    test "clear specific key requires re-init for that key only" do
+      TestExpirables.init(:require_init_keyed, "k1", %{token_prefix: "one"})
+      TestExpirables.init(:require_init_keyed, "k2", %{token_prefix: "two"})
+      {:ok, _, _} = TestExpirables.fetch(:require_init_keyed, "k1")
+      {:ok, _, _} = TestExpirables.fetch(:require_init_keyed, "k2")
+
+      TestExpirables.clear(:require_init_keyed, "k1")
+
+      :error = TestExpirables.fetch(:require_init_keyed, "k1")
+      {:ok, _, _} = TestExpirables.fetch(:require_init_keyed, "k2")
+    end
+  end
+
+  # ===========================================================================
+  # supervision
+  # ===========================================================================
+
   describe "supervision" do
     test "agents are added to DynamicSupervisor" do
       %{active: active_before} = DynamicSupervisor.count_children(ExpirableStore.Supervisor)

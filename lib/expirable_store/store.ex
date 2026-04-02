@@ -1,18 +1,32 @@
 defmodule ExpirableStore.Store do
   @moduledoc false
 
+  # Agent state: {cached_result, user_state}
+  # cached_result: {:ok, value, expires_at} | :error | :not_fetched
+  # user_state: any term (nil when require_init is false)
+
   # ===========================================================================
   # Public API
   # ===========================================================================
 
-  def fetch(module, name, fetch_fn, refresh, scope) do
+  def init(module, name, init_state, scope) do
     group = make_group(scope, module, name)
-    do_fetch(group, fetch_fn, refresh, scope)
+    do_init(group, init_state, scope)
   end
 
-  def fetch(module, name, key, fetch_fn, refresh, scope) do
+  def init(module, name, key, init_state, scope) do
     group = make_group(scope, module, name, key)
-    do_fetch(group, fetch_fn, refresh, scope)
+    do_init(group, init_state, scope)
+  end
+
+  def fetch(module, name, fetch_fn, refresh, scope, require_init) do
+    group = make_group(scope, module, name)
+    do_fetch(group, fetch_fn, refresh, scope, require_init)
+  end
+
+  def fetch(module, name, key, fetch_fn, refresh, scope, require_init) do
+    group = make_group(scope, module, name, key)
+    do_fetch(group, fetch_fn, refresh, scope, require_init)
   end
 
   def clear(module, name, scope) do
@@ -56,8 +70,12 @@ defmodule ExpirableStore.Store do
   defp make_family_group(:cluster, module, name), do: {:cluster, :keyed_family, module, name}
   defp make_family_group(:local, module, name), do: {:local, node(), :keyed_family, module, name}
 
-  defp family_group_from({:cluster, :keyed, module, name, _key}), do: {:cluster, :keyed_family, module, name}
-  defp family_group_from({:local, _node, :keyed, module, name, _key}), do: {:local, node(), :keyed_family, module, name}
+  defp family_group_from({:cluster, :keyed, module, name, _key}),
+    do: {:cluster, :keyed_family, module, name}
+
+  defp family_group_from({:local, _node, :keyed, module, name, _key}),
+    do: {:local, node(), :keyed_family, module, name}
+
   defp family_group_from({:cluster, :unkeyed, _, _}), do: nil
   defp family_group_from({:local, _, :unkeyed, _, _}), do: nil
 
@@ -69,21 +87,44 @@ defmodule ExpirableStore.Store do
     :global.trans({group, self()}, fun, [node()])
   end
 
-  defp do_fetch(group, fetch_fn, refresh, scope) do
+  defp do_init(group, init_state, scope) do
+    global_trans(group, scope, fn ->
+      local_pid = get_local_agent(group)
+
+      if is_nil(local_pid) or not Process.alive?(local_pid) do
+        start_agent(group, {:not_fetched, init_state}, scope)
+        :ok
+      else
+        Agent.update(local_pid, fn {cached_result, _old_state} -> {cached_result, init_state} end)
+        :ok
+      end
+    end)
+  end
+
+  defp do_fetch(group, fetch_fn, refresh, scope, require_init) do
     local_pid = get_local_agent(group)
 
     if is_nil(local_pid) or not Process.alive?(local_pid) do
-      acquire_lock_and_fetch(group, fetch_fn, refresh, scope)
+      if require_init do
+        :error
+      else
+        acquire_lock_and_fetch(group, fetch_fn, refresh, scope, nil)
+      end
     else
-      case Agent.get(local_pid, & &1) do
-        :error ->
-          acquire_lock_and_fetch(group, fetch_fn, refresh, scope)
+      {cached_result, state} = Agent.get(local_pid, & &1)
 
-        {:ok, _, expires_at} = entry ->
+      case cached_result do
+        :not_fetched ->
+          acquire_lock_and_fetch(group, fetch_fn, refresh, scope, state)
+
+        :error ->
+          acquire_lock_and_fetch(group, fetch_fn, refresh, scope, state)
+
+        {:ok, _, expires_at} ->
           if expired?(expires_at) do
-            acquire_lock_and_fetch(group, fetch_fn, refresh, scope)
+            acquire_lock_and_fetch(group, fetch_fn, refresh, scope, state)
           else
-            entry
+            cached_result
           end
       end
     end
@@ -128,27 +169,21 @@ defmodule ExpirableStore.Store do
     :pg.get_members(:expirable_store, group)
   end
 
-  defp get_value_from_cluster(group) do
+  defp get_agent_state_from_cluster(group) do
     :pg.get_members(:expirable_store, group)
     |> Enum.find_value(fn pid ->
       try do
         Agent.get(pid, & &1)
       catch
-        :exit, _ -> :error
+        :exit, _ -> nil
       end
     end)
   end
 
-  defp create_agent(group, fetch_fn, refresh, scope) do
-    initial_value =
-      case get_value_from_cluster(group) do
-        {:ok, _, _} = entry -> entry
-        _ -> fetch_fn.()
-      end
-
+  defp start_agent(group, agent_state, scope) do
     spec = %{
       id: {scope, group},
-      start: {Agent, :start_link, [fn -> initial_value end]},
+      start: {Agent, :start_link, [fn -> agent_state end]},
       restart: :temporary
     }
 
@@ -160,46 +195,71 @@ defmodule ExpirableStore.Store do
       family_group -> :ok = :pg.join(:expirable_store, family_group, pid)
     end
 
-    schedule_eager_refresh(group, initial_value, fetch_fn, refresh, scope)
-
     pid
   end
 
-  defp acquire_lock_and_fetch(group, fetch_fn, refresh, scope) do
+  defp acquire_lock_and_fetch(group, fetch_fn, refresh, scope, state) do
     global_trans(group, scope, fn ->
       local_pid = get_local_agent(group)
 
       if is_nil(local_pid) or not Process.alive?(local_pid) do
-        new_pid = create_agent(group, fetch_fn, refresh, scope)
-        Agent.get(new_pid, & &1)
-      else
-        case Agent.get(local_pid, & &1) do
-          :error ->
-            new_entry = fetch_fn.()
-            update_all_members(group, new_entry)
-            schedule_eager_refresh(group, new_entry, fetch_fn, refresh, scope)
-            new_entry
+        case get_agent_state_from_cluster(group) do
+          {cached_result, cluster_state}
+          when cached_result != :error and cached_result != :not_fetched ->
+            start_agent(group, {cached_result, cluster_state}, scope)
+            cached_result
 
-          {:ok, _, expires_at} = entry ->
+          {_cached_result, cluster_state} ->
+            fetch_and_create_agent(group, fetch_fn, refresh, scope, cluster_state)
+
+          nil ->
+            fetch_and_create_agent(group, fetch_fn, refresh, scope, state)
+        end
+      else
+        {cached_result, current_state} = Agent.get(local_pid, & &1)
+
+        case cached_result do
+          x when x in [:not_fetched, :error] ->
+            fetch_and_update(group, fetch_fn, refresh, scope, current_state)
+
+          {:ok, _, expires_at} ->
             if expired?(expires_at) do
-              new_entry = fetch_fn.()
-              update_all_members(group, new_entry)
-              schedule_eager_refresh(group, new_entry, fetch_fn, refresh, scope)
-              new_entry
+              fetch_and_update(group, fetch_fn, refresh, scope, current_state)
             else
-              entry
+              cached_result
             end
         end
       end
     end)
   end
 
-  defp update_all_members(group, new_entry) do
+  defp fetch_and_create_agent(group, fetch_fn, refresh, scope, state) do
+    {cached_result, next_state} = call_fetch(fetch_fn, state)
+    start_agent(group, {cached_result, next_state}, scope)
+    schedule_eager_refresh(group, cached_result, fetch_fn, refresh, scope)
+    cached_result
+  end
+
+  defp fetch_and_update(group, fetch_fn, refresh, scope, state) do
+    {cached_result, next_state} = call_fetch(fetch_fn, state)
+    update_all_members(group, {cached_result, next_state})
+    schedule_eager_refresh(group, cached_result, fetch_fn, refresh, scope)
+    cached_result
+  end
+
+  defp call_fetch(fetch_fn, state) do
+    case fetch_fn.(state) do
+      {:ok, value, expires_at, next_state} -> {{:ok, value, expires_at}, next_state}
+      {:error, next_state} -> {:error, next_state}
+    end
+  end
+
+  defp update_all_members(group, agent_state) do
     group
     |> get_all_agents()
     |> Enum.each(fn pid ->
       try do
-        Agent.update(pid, fn _ -> new_entry end)
+        Agent.update(pid, fn _ -> agent_state end)
       catch
         _, _ -> :ok
       end
@@ -237,9 +297,10 @@ defmodule ExpirableStore.Store do
       if is_nil(local_pid) or not Process.alive?(local_pid) do
         :ok
       else
-        new_entry = fetch_fn.()
-        update_all_members(group, new_entry)
-        schedule_eager_refresh(group, new_entry, fetch_fn, refresh, scope)
+        {_cached_result, state} = Agent.get(local_pid, & &1)
+        {new_cached_result, next_state} = call_fetch(fetch_fn, state)
+        update_all_members(group, {new_cached_result, next_state})
+        schedule_eager_refresh(group, new_cached_result, fetch_fn, refresh, scope)
       end
     end)
   end

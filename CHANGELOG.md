@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.5.0 (2026-04-02)
+## v0.6.0 (2026-04-02)
 
 - Add `keyed: true` option for per-key independent cache entries and timers
 - Keyed fetch functions accept a runtime key argument (any Erlang term)

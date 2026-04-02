@@ -9,16 +9,40 @@ defmodule ExpirableStore do
   use Spark.Dsl, default_extensions: [extensions: [ExpirableStore.Dsl]]
 
   @doc """
-  Fetch a stored value, returning `{:ok, value, expires_at}` on success or `:error` on failure.
+  Initialize the state for an expirable that has `require_init: true`.
 
-  The fetch function must return `{:ok, value, expires_at}` where `expires_at` is a Unix
-  timestamp in milliseconds, or `:error`.
+  Must be called before `fetch/2` for the given expirable.
   """
-  def fetch(module, name) do
-    %{fetch: fetch_fn, scope: scope, refresh: refresh} =
+  def init(module, name, init_state) do
+    %{scope: scope} =
       ExpirableStore.Info.expirables(module) |> Enum.find(fn e -> e.name == name end)
 
-    ExpirableStore.Store.fetch(module, name, fetch_fn, refresh, scope)
+    ExpirableStore.Store.init(module, name, init_state, scope)
+  end
+
+  @doc """
+  Initialize the state for a keyed expirable that has `require_init: true`.
+
+  Must be called before `fetch/3` for the given key.
+  """
+  def init(module, name, key, init_state) do
+    %{scope: scope} =
+      ExpirableStore.Info.expirables(module) |> Enum.find(fn e -> e.name == name end)
+
+    ExpirableStore.Store.init(module, name, key, init_state, scope)
+  end
+
+  @doc """
+  Fetch a stored value, returning `{:ok, value, expires_at}` on success or `:error` on failure.
+
+  The fetch function receives state and must return `{:ok, value, expires_at, next_state}`
+  or `{:error, next_state}`.
+  """
+  def fetch(module, name) do
+    %{fetch: fetch_fn, scope: scope, refresh: refresh, require_init: require_init} =
+      ExpirableStore.Info.expirables(module) |> Enum.find(fn e -> e.name == name end)
+
+    ExpirableStore.Store.fetch(module, name, fetch_fn, refresh, scope, require_init)
   end
 
   @doc """
@@ -28,11 +52,11 @@ defmodule ExpirableStore do
   Each unique key has its own independent cache entry and timer.
   """
   def fetch(module, name, key) do
-    %{fetch: fetch_fn, scope: scope, refresh: refresh} =
+    %{fetch: fetch_fn, scope: scope, refresh: refresh, require_init: require_init} =
       ExpirableStore.Info.expirables(module) |> Enum.find(fn e -> e.name == name end)
 
-    bound_fetch_fn = fn -> fetch_fn.(key) end
-    ExpirableStore.Store.fetch(module, name, key, bound_fetch_fn, refresh, scope)
+    bound_fetch_fn = fn state -> fetch_fn.(key, state) end
+    ExpirableStore.Store.fetch(module, name, key, bound_fetch_fn, refresh, scope, require_init)
   end
 
   @doc """
