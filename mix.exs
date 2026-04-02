@@ -16,7 +16,20 @@ defmodule ExpirableStore.MixProject do
         "Lightweight expirable value store for Elixir with cluster-wide or local scoping",
       package: package(),
       docs: docs(),
-      source_url: @source_url
+      source_url: @source_url,
+      aliases: aliases()
+    ]
+  end
+
+  def cli do
+    [
+      preferred_envs: ["test.all": :test]
+    ]
+  end
+
+  defp aliases do
+    [
+      "test.all": "cmd elixir --sname test_runner -S mix test --include distributed"
     ]
   end
 

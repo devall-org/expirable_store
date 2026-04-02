@@ -1,5 +1,7 @@
 # ExpirableStore
 
+[![CI](https://github.com/devall-org/expirable_store/actions/workflows/ci.yml/badge.svg)](https://github.com/devall-org/expirable_store/actions/workflows/ci.yml)
+
 Lightweight expirable value store for Elixir with cluster-wide or local scoping.
 
 Perfect for caching OAuth tokens, API keys, and other time-sensitive data that shouldn't be repeatedly refreshed.
@@ -169,5 +171,9 @@ Additionally, generic functions are available:
 ## Development
 
 ```bash
+# Run single-node tests (no setup required)
 mix test
+
+# Run all tests including distributed multi-node tests
+mix test.all
 ```

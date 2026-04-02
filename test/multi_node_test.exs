@@ -1,6 +1,8 @@
 defmodule ExpirableStore.MultiNodeTest do
   use ExUnit.Case, async: false
 
+  @moduletag :distributed
+
   setup do
     [{_pid2, node2}] = nodes = ClusterHelper.start_nodes([:node2])
     :yes = :global.register_name(:fetch_tracker, self())
