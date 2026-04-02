@@ -5,100 +5,50 @@ defmodule ExpirableStore.AddFunctions do
   def transform(dsl_state) do
     expirables = Spark.Dsl.Transformer.get_entities(dsl_state, [:expirables])
 
-    # Generate named functions for each expirable
-    named_functions =
-      Enum.flat_map(expirables, fn %{name: name, scope: scope, refresh: refresh, keyed: keyed} ->
+    per_expirable_fns =
+      Enum.map(expirables, fn %{name: name, scope: scope, refresh: refresh, keyed: keyed} ->
         bang_name = String.to_atom("#{name}!")
         scope_str = inspect(scope)
         refresh_str = inspect(refresh)
+        args = if keyed, do: [quote do: key], else: []
+        keyed_doc = if keyed, do: "\n- keyed: true", else: ""
 
-        if keyed do
-          [
-            quote do
-              @doc """
-              Fetch the `#{unquote(name)}` expirable value for the given key.
+        quote do
+          @doc """
+          Fetch the `#{unquote(name)}` expirable value.
 
-              - scope: #{unquote(scope_str)}
-              - refresh: #{unquote(refresh_str)}
-              - keyed: true
-              """
-              def unquote(name)(key) do
-                ExpirableStore.fetch(__MODULE__, unquote(name), key)
-              end
+          - scope: #{unquote(scope_str)}
+          - refresh: #{unquote(refresh_str)}#{unquote(keyed_doc)}
+          """
+          def unquote(name)(unquote_splicing(args)) do
+            ExpirableStore.fetch(__MODULE__, unquote(name), unquote_splicing(args))
+          end
 
-              @doc """
-              Fetch the `#{unquote(name)}` expirable value for the given key, raises on error.
+          @doc """
+          Fetch the `#{unquote(name)}` expirable value, raises on error.
 
-              - scope: #{unquote(scope_str)}
-              - refresh: #{unquote(refresh_str)}
-              - keyed: true
-              """
-              def unquote(bang_name)(key) do
-                ExpirableStore.fetch!(__MODULE__, unquote(name), key)
-              end
-            end
-          ]
-        else
-          [
-            quote do
-              @doc """
-              Fetch the `#{unquote(name)}` expirable value.
-
-              - scope: #{unquote(scope_str)}
-              - refresh: #{unquote(refresh_str)}
-              """
-              def unquote(name)() do
-                ExpirableStore.fetch(__MODULE__, unquote(name))
-              end
-
-              @doc """
-              Fetch the `#{unquote(name)}` expirable value, raises on error.
-
-              - scope: #{unquote(scope_str)}
-              - refresh: #{unquote(refresh_str)}
-              """
-              def unquote(bang_name)() do
-                ExpirableStore.fetch!(__MODULE__, unquote(name))
-              end
-            end
-          ]
+          - scope: #{unquote(scope_str)}
+          - refresh: #{unquote(refresh_str)}#{unquote(keyed_doc)}
+          """
+          def unquote(bang_name)(unquote_splicing(args)) do
+            ExpirableStore.fetch!(__MODULE__, unquote(name), unquote_splicing(args))
+          end
         end
       end)
 
-    # Generic functions
-    generic_functions =
+    generic_fns =
       quote do
-        def fetch(name) do
-          ExpirableStore.fetch(__MODULE__, name)
-        end
-
-        def fetch!(name) do
-          ExpirableStore.fetch!(__MODULE__, name)
-        end
-
-        def fetch(name, key) do
-          ExpirableStore.fetch(__MODULE__, name, key)
-        end
-
-        def fetch!(name, key) do
-          ExpirableStore.fetch!(__MODULE__, name, key)
-        end
-
-        def clear(name) do
-          ExpirableStore.clear(__MODULE__, name)
-        end
-
-        def clear(name, key) do
-          ExpirableStore.clear(__MODULE__, name, key)
-        end
-
-        def clear_all() do
-          ExpirableStore.clear_all(__MODULE__)
-        end
+        def fetch(name), do: ExpirableStore.fetch(__MODULE__, name)
+        def fetch!(name), do: ExpirableStore.fetch!(__MODULE__, name)
+        def fetch(name, key), do: ExpirableStore.fetch(__MODULE__, name, key)
+        def fetch!(name, key), do: ExpirableStore.fetch!(__MODULE__, name, key)
+        def clear(name), do: ExpirableStore.clear(__MODULE__, name)
+        def clear(name, key), do: ExpirableStore.clear(__MODULE__, name, key)
+        def clear_all(), do: ExpirableStore.clear_all(__MODULE__)
       end
 
     {:ok,
      dsl_state
-     |> Spark.Dsl.Transformer.eval([], [generic_functions | named_functions])}
+     |> Spark.Dsl.Transformer.eval([], [generic_fns | per_expirable_fns])}
   end
 end
