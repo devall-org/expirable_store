@@ -48,7 +48,7 @@ defmodule ExpirableStore.MultiNodeTest do
     end
 
     test "each node has local replica via :pg", %{node2: node2} do
-      group = {:cluster, TestExpirables, :cluster_lazy}
+      group = {:cluster, :unkeyed, TestExpirables, :cluster_lazy}
 
       assert length(:pg.get_local_members(:expirable_store, group)) == 0
       assert length(:erpc.call(node2, :pg, :get_local_members, [:expirable_store, group])) == 0
@@ -163,8 +163,8 @@ defmodule ExpirableStore.MultiNodeTest do
       {:ok, _, _} = TestExpirables.fetch(:local_lazy)
 
       # Each node has its own group
-      group1 = {:local, node(), TestExpirables, :local_lazy}
-      group2 = {:local, node2, TestExpirables, :local_lazy}
+      group1 = {:local, node(), :unkeyed, TestExpirables, :local_lazy}
+      group2 = {:local, node2, :unkeyed, TestExpirables, :local_lazy}
       assert length(:pg.get_members(:expirable_store, group1)) == 1
       assert length(:pg.get_members(:expirable_store, group2)) == 1
     end
@@ -265,7 +265,7 @@ defmodule ExpirableStore.MultiNodeTest do
       assert_receive {:fetch, :cluster_lazy, _node}
 
       # Wait for pg to sync across nodes
-      group = {:cluster, TestExpirables, :cluster_lazy}
+      group = {:cluster, :unkeyed, TestExpirables, :cluster_lazy}
       wait_until(fn -> length(:pg.get_members(:expirable_store, group)) == 1 end)
 
       # Second node should get the same value without calling fetch_fn

@@ -136,4 +136,92 @@ defmodule TestExpirables do
     refresh {:eager, before_expiry: 20}
     scope :cluster
   end
+
+  # ===========================================
+  # keyed, scope :cluster, refresh :lazy
+  # ===========================================
+
+  expirable :cluster_lazy_keyed do
+    fetch fn key ->
+      case :global.whereis_name(:fetch_tracker) do
+        pid when is_pid(pid) -> send(pid, {:fetch, :cluster_lazy_keyed, key, node()})
+        _ -> :ok
+      end
+
+      Process.sleep(50)
+      token = "cluster_lazy_keyed_#{key}_#{:rand.uniform(10000)}"
+      expires_at = System.system_time(:millisecond) + 200
+      {:ok, token, expires_at}
+    end
+
+    keyed true
+    refresh :lazy
+    scope :cluster
+  end
+
+  # ===========================================
+  # keyed, scope :cluster, refresh :eager
+  # ===========================================
+
+  expirable :cluster_eager_keyed do
+    fetch fn key ->
+      case :global.whereis_name(:fetch_tracker) do
+        pid when is_pid(pid) -> send(pid, {:fetch, :cluster_eager_keyed, key, node()})
+        _ -> :ok
+      end
+
+      Process.sleep(50)
+      token = "cluster_eager_keyed_#{key}_#{:rand.uniform(10000)}"
+      expires_at = System.system_time(:millisecond) + 200
+      {:ok, token, expires_at}
+    end
+
+    keyed true
+    refresh {:eager, before_expiry: 20}
+    scope :cluster
+  end
+
+  # ===========================================
+  # keyed, scope :local, refresh :lazy
+  # ===========================================
+
+  expirable :local_lazy_keyed do
+    fetch fn key ->
+      case :global.whereis_name(:fetch_tracker) do
+        pid when is_pid(pid) -> send(pid, {:fetch, :local_lazy_keyed, key, node()})
+        _ -> :ok
+      end
+
+      Process.sleep(50)
+      token = "local_lazy_keyed_#{key}_#{:rand.uniform(10000)}"
+      expires_at = System.system_time(:millisecond) + 200
+      {:ok, token, expires_at}
+    end
+
+    keyed true
+    refresh :lazy
+    scope :local
+  end
+
+  # ===========================================
+  # keyed, scope :local, refresh :eager
+  # ===========================================
+
+  expirable :local_eager_keyed do
+    fetch fn key ->
+      case :global.whereis_name(:fetch_tracker) do
+        pid when is_pid(pid) -> send(pid, {:fetch, :local_eager_keyed, key, node()})
+        _ -> :ok
+      end
+
+      Process.sleep(50)
+      token = "local_eager_keyed_#{key}_#{:rand.uniform(10000)}"
+      expires_at = System.system_time(:millisecond) + 200
+      {:ok, token, expires_at}
+    end
+
+    keyed true
+    refresh {:eager, before_expiry: 20}
+    scope :local
+  end
 end

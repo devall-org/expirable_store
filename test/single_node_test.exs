@@ -48,7 +48,7 @@ defmodule ExpirableStore.SingleNodeTest do
     end
 
     test "agents are added to :pg groups" do
-      group = {:cluster, TestExpirables, :cluster_lazy}
+      group = {:cluster, :unkeyed, TestExpirables, :cluster_lazy}
       assert length(:pg.get_members(:expirable_store, group)) == 0
 
       {:ok, _, _} = TestExpirables.fetch(:cluster_lazy)
@@ -90,7 +90,7 @@ defmodule ExpirableStore.SingleNodeTest do
     end
 
     test "agents are added to :pg groups" do
-      group = {:cluster, TestExpirables, :cluster_eager}
+      group = {:cluster, :unkeyed, TestExpirables, :cluster_eager}
       assert length(:pg.get_members(:expirable_store, group)) == 0
 
       {:ok, _, _} = TestExpirables.fetch(:cluster_eager)
@@ -131,7 +131,7 @@ defmodule ExpirableStore.SingleNodeTest do
     end
 
     test "uses :pg groups with node-scoped key" do
-      group = {:local, node(), TestExpirables, :local_lazy}
+      group = {:local, node(), :unkeyed, TestExpirables, :local_lazy}
       assert length(:pg.get_members(:expirable_store, group)) == 0
 
       {:ok, _, _} = TestExpirables.fetch(:local_lazy)
@@ -164,7 +164,7 @@ defmodule ExpirableStore.SingleNodeTest do
     end
 
     test "uses :pg groups with node-scoped key" do
-      group = {:local, node(), TestExpirables, :local_eager}
+      group = {:local, node(), :unkeyed, TestExpirables, :local_eager}
       assert length(:pg.get_members(:expirable_store, group)) == 0
 
       {:ok, _, _} = TestExpirables.fetch(:local_eager)
@@ -293,6 +293,221 @@ defmodule ExpirableStore.SingleNodeTest do
       {:ok, token2, :infinity} = TestExpirables.fetch(:never_expires_eager)
       refute_receive {:fetch, :never_expires_eager, _}
       assert token1 == token2
+    end
+  end
+
+  # ===========================================================================
+  # keyed expirables
+  # ===========================================================================
+
+  describe "keyed expirables (cluster, lazy)" do
+    test "different keys are cached independently" do
+      {:ok, token_a, _} = TestExpirables.cluster_lazy_keyed("apple")
+      assert_receive {:fetch, :cluster_lazy_keyed, "apple", _}
+
+      {:ok, token_b, _} = TestExpirables.cluster_lazy_keyed("banana")
+      assert_receive {:fetch, :cluster_lazy_keyed, "banana", _}
+
+      assert token_a != token_b
+      assert String.starts_with?(token_a, "cluster_lazy_keyed_apple_")
+      assert String.starts_with?(token_b, "cluster_lazy_keyed_banana_")
+    end
+
+    test "same key returns cached value" do
+      {:ok, token1, _} = TestExpirables.cluster_lazy_keyed("apple")
+      assert_receive {:fetch, :cluster_lazy_keyed, "apple", _}
+
+      {:ok, token2, _} = TestExpirables.cluster_lazy_keyed("apple")
+      refute_receive {:fetch, :cluster_lazy_keyed, "apple", _}
+
+      assert token1 == token2
+    end
+
+    test "each key has its own pg group" do
+      group_a = {:cluster, :keyed, TestExpirables, :cluster_lazy_keyed, "apple"}
+      group_b = {:cluster, :keyed, TestExpirables, :cluster_lazy_keyed, "banana"}
+
+      assert length(:pg.get_members(:expirable_store, group_a)) == 0
+      assert length(:pg.get_members(:expirable_store, group_b)) == 0
+
+      {:ok, _, _} = TestExpirables.cluster_lazy_keyed("apple")
+      assert length(:pg.get_members(:expirable_store, group_a)) == 1
+      assert length(:pg.get_members(:expirable_store, group_b)) == 0
+    end
+
+    test "clear with key removes only that key" do
+      {:ok, token_a, _} = TestExpirables.cluster_lazy_keyed("apple")
+      {:ok, token_b, _} = TestExpirables.cluster_lazy_keyed("banana")
+
+      TestExpirables.clear(:cluster_lazy_keyed, "apple")
+
+      {:ok, token_a2, _} = TestExpirables.cluster_lazy_keyed("apple")
+      {:ok, token_b2, _} = TestExpirables.cluster_lazy_keyed("banana")
+
+      assert token_a2 != token_a
+      assert token_b2 == token_b
+    end
+
+    test "clear without key removes all keys" do
+      {:ok, token_a, _} = TestExpirables.cluster_lazy_keyed("apple")
+      {:ok, token_b, _} = TestExpirables.cluster_lazy_keyed("banana")
+
+      TestExpirables.clear(:cluster_lazy_keyed)
+
+      {:ok, token_a2, _} = TestExpirables.cluster_lazy_keyed("apple")
+      {:ok, token_b2, _} = TestExpirables.cluster_lazy_keyed("banana")
+
+      assert token_a2 != token_a
+      assert token_b2 != token_b
+    end
+
+    test "clear_all clears all keyed entries" do
+      {:ok, token_a, _} = TestExpirables.cluster_lazy_keyed("apple")
+      {:ok, token_b, _} = TestExpirables.cluster_lazy_keyed("banana")
+
+      TestExpirables.clear_all()
+
+      {:ok, token_a2, _} = TestExpirables.cluster_lazy_keyed("apple")
+      {:ok, token_b2, _} = TestExpirables.cluster_lazy_keyed("banana")
+
+      assert token_a2 != token_a
+      assert token_b2 != token_b
+    end
+
+    test "expiration works independently per key" do
+      {:ok, token_a, _} = TestExpirables.cluster_lazy_keyed("apple")
+      assert_receive {:fetch, :cluster_lazy_keyed, "apple", _}
+
+      Process.sleep(210)
+
+      {:ok, token_a2, _} = TestExpirables.cluster_lazy_keyed("apple")
+      assert_receive {:fetch, :cluster_lazy_keyed, "apple", _}
+      assert token_a2 != token_a
+    end
+
+    test "named function! variant raises on error" do
+      # The bang function should work for success case
+      token = TestExpirables.cluster_lazy_keyed!("cherry")
+      assert String.starts_with?(token, "cluster_lazy_keyed_cherry_")
+    end
+
+    test "generic fetch/2 and clear/2 work" do
+      {:ok, t1, _} = TestExpirables.fetch(:cluster_lazy_keyed, "mango")
+      assert_receive {:fetch, :cluster_lazy_keyed, "mango", _}
+
+      {:ok, t2, _} = TestExpirables.fetch(:cluster_lazy_keyed, "mango")
+      refute_receive {:fetch, :cluster_lazy_keyed, "mango", _}
+      assert t1 == t2
+
+      TestExpirables.clear(:cluster_lazy_keyed, "mango")
+
+      {:ok, t3, _} = TestExpirables.fetch(:cluster_lazy_keyed, "mango")
+      assert_receive {:fetch, :cluster_lazy_keyed, "mango", _}
+      assert t3 != t1
+    end
+  end
+
+  describe "keyed expirables (cluster, eager)" do
+    test "different keys get independent eager refresh" do
+      {:ok, token_a, _} = TestExpirables.cluster_eager_keyed("apple")
+      assert_receive {:fetch, :cluster_eager_keyed, "apple", _}
+
+      {:ok, token_b, _} = TestExpirables.cluster_eager_keyed("banana")
+      assert_receive {:fetch, :cluster_eager_keyed, "banana", _}
+
+      assert token_a != token_b
+
+      Process.sleep(240)
+
+      assert_receive {:fetch, :cluster_eager_keyed, "apple", _}
+      assert_receive {:fetch, :cluster_eager_keyed, "banana", _}
+
+      {:ok, token_a2, _} = TestExpirables.cluster_eager_keyed("apple")
+      {:ok, token_b2, _} = TestExpirables.cluster_eager_keyed("banana")
+
+      assert token_a2 != token_a
+      assert token_b2 != token_b
+    end
+
+    test "uses cluster pg groups per key" do
+      group_a = {:cluster, :keyed, TestExpirables, :cluster_eager_keyed, "apple"}
+      assert length(:pg.get_members(:expirable_store, group_a)) == 0
+
+      {:ok, _, _} = TestExpirables.cluster_eager_keyed("apple")
+      assert length(:pg.get_members(:expirable_store, group_a)) == 1
+    end
+  end
+
+  describe "keyed expirables (local, lazy)" do
+    test "different keys are cached independently" do
+      {:ok, token_a, _} = TestExpirables.local_lazy_keyed("apple")
+      assert_receive {:fetch, :local_lazy_keyed, "apple", _}
+
+      {:ok, token_b, _} = TestExpirables.local_lazy_keyed("banana")
+      assert_receive {:fetch, :local_lazy_keyed, "banana", _}
+
+      assert token_a != token_b
+    end
+
+    test "same key returns cached value" do
+      {:ok, token1, _} = TestExpirables.local_lazy_keyed("apple")
+      assert_receive {:fetch, :local_lazy_keyed, "apple", _}
+
+      {:ok, token2, _} = TestExpirables.local_lazy_keyed("apple")
+      refute_receive {:fetch, :local_lazy_keyed, "apple", _}
+
+      assert token1 == token2
+    end
+
+    test "uses node-scoped pg groups per key" do
+      group_a = {:local, node(), :keyed, TestExpirables, :local_lazy_keyed, "apple"}
+      assert length(:pg.get_members(:expirable_store, group_a)) == 0
+
+      {:ok, _, _} = TestExpirables.local_lazy_keyed("apple")
+      assert length(:pg.get_members(:expirable_store, group_a)) == 1
+    end
+
+    test "expiration works independently per key" do
+      {:ok, token_a, _} = TestExpirables.local_lazy_keyed("apple")
+      assert_receive {:fetch, :local_lazy_keyed, "apple", _}
+
+      Process.sleep(210)
+
+      {:ok, token_a2, _} = TestExpirables.local_lazy_keyed("apple")
+      assert_receive {:fetch, :local_lazy_keyed, "apple", _}
+      assert token_a2 != token_a
+    end
+  end
+
+  describe "keyed expirables (local, eager)" do
+    test "different keys get independent eager refresh" do
+      {:ok, token_a, _} = TestExpirables.local_eager_keyed("apple")
+      assert_receive {:fetch, :local_eager_keyed, "apple", _}
+
+      {:ok, token_b, _} = TestExpirables.local_eager_keyed("banana")
+      assert_receive {:fetch, :local_eager_keyed, "banana", _}
+
+      assert token_a != token_b
+
+      # Wait for eager refresh: 200ms - 20ms before_expiry + 50ms fetch + margin
+      Process.sleep(240)
+
+      assert_receive {:fetch, :local_eager_keyed, "apple", _}
+      assert_receive {:fetch, :local_eager_keyed, "banana", _}
+
+      {:ok, token_a2, _} = TestExpirables.local_eager_keyed("apple")
+      {:ok, token_b2, _} = TestExpirables.local_eager_keyed("banana")
+
+      assert token_a2 != token_a
+      assert token_b2 != token_b
+    end
+
+    test "uses node-scoped pg groups per key" do
+      group_a = {:local, node(), :keyed, TestExpirables, :local_eager_keyed, "apple"}
+      assert length(:pg.get_members(:expirable_store, group_a)) == 0
+
+      {:ok, _, _} = TestExpirables.local_eager_keyed("apple")
+      assert length(:pg.get_members(:expirable_store, group_a)) == 1
     end
   end
 

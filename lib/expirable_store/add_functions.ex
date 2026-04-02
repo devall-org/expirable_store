@@ -7,34 +7,62 @@ defmodule ExpirableStore.AddFunctions do
 
     # Generate named functions for each expirable
     named_functions =
-      Enum.flat_map(expirables, fn %{name: name, scope: scope, refresh: refresh} ->
+      Enum.flat_map(expirables, fn %{name: name, scope: scope, refresh: refresh, keyed: keyed} ->
         bang_name = String.to_atom("#{name}!")
         scope_str = inspect(scope)
         refresh_str = inspect(refresh)
 
-        [
-          quote do
-            @doc """
-            Fetch the `#{unquote(name)}` expirable value.
+        if keyed do
+          [
+            quote do
+              @doc """
+              Fetch the `#{unquote(name)}` expirable value for the given key.
 
-            - scope: #{unquote(scope_str)}
-            - refresh: #{unquote(refresh_str)}
-            """
-            def unquote(name)() do
-              ExpirableStore.fetch(__MODULE__, unquote(name))
+              - scope: #{unquote(scope_str)}
+              - refresh: #{unquote(refresh_str)}
+              - keyed: true
+              """
+              def unquote(name)(key) do
+                ExpirableStore.fetch(__MODULE__, unquote(name), key)
+              end
+
+              @doc """
+              Fetch the `#{unquote(name)}` expirable value for the given key, raises on error.
+
+              - scope: #{unquote(scope_str)}
+              - refresh: #{unquote(refresh_str)}
+              - keyed: true
+              """
+              def unquote(bang_name)(key) do
+                ExpirableStore.fetch!(__MODULE__, unquote(name), key)
+              end
             end
+          ]
+        else
+          [
+            quote do
+              @doc """
+              Fetch the `#{unquote(name)}` expirable value.
 
-            @doc """
-            Fetch the `#{unquote(name)}` expirable value, raises on error.
+              - scope: #{unquote(scope_str)}
+              - refresh: #{unquote(refresh_str)}
+              """
+              def unquote(name)() do
+                ExpirableStore.fetch(__MODULE__, unquote(name))
+              end
 
-            - scope: #{unquote(scope_str)}
-            - refresh: #{unquote(refresh_str)}
-            """
-            def unquote(bang_name)() do
-              ExpirableStore.fetch!(__MODULE__, unquote(name))
+              @doc """
+              Fetch the `#{unquote(name)}` expirable value, raises on error.
+
+              - scope: #{unquote(scope_str)}
+              - refresh: #{unquote(refresh_str)}
+              """
+              def unquote(bang_name)() do
+                ExpirableStore.fetch!(__MODULE__, unquote(name))
+              end
             end
-          end
-        ]
+          ]
+        end
       end)
 
     # Generic functions
@@ -48,8 +76,20 @@ defmodule ExpirableStore.AddFunctions do
           ExpirableStore.fetch!(__MODULE__, name)
         end
 
+        def fetch(name, key) do
+          ExpirableStore.fetch(__MODULE__, name, key)
+        end
+
+        def fetch!(name, key) do
+          ExpirableStore.fetch!(__MODULE__, name, key)
+        end
+
         def clear(name) do
           ExpirableStore.clear(__MODULE__, name)
+        end
+
+        def clear(name, key) do
+          ExpirableStore.clear(__MODULE__, name, key)
         end
 
         def clear_all() do

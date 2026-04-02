@@ -1,6 +1,6 @@
 defmodule ExpirableStore.Dsl do
   defmodule Expirable do
-    defstruct [:name, :fetch, :refresh, :scope, :__spark_metadata__]
+    defstruct [:name, :fetch, :refresh, :scope, :keyed, :__spark_metadata__]
   end
 
   @expirable %Spark.Dsl.Entity{
@@ -15,10 +15,17 @@ defmodule ExpirableStore.Dsl do
         doc: "The name of the expirable"
       ],
       fetch: [
-        type: {:fun, 0},
+        type: {:or, [{:fun, 0}, {:fun, 1}]},
         required: true,
         doc:
-          "Function that returns {:ok, value, expires_at} or :error. expires_at is Unix timestamp in milliseconds, or :infinity for values that never expire."
+          "Function that returns {:ok, value, expires_at} or :error. expires_at is Unix timestamp in milliseconds, or :infinity for values that never expire. Use a 1-arity function when keyed: true."
+      ],
+      keyed: [
+        type: :boolean,
+        required: false,
+        default: false,
+        doc:
+          "When true, each unique key argument gets its own independent cache entry and timer. The fetch function must accept one argument (the key)."
       ],
       refresh: [
         type:
