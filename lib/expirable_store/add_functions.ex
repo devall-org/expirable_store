@@ -1,4 +1,6 @@
 defmodule ExpirableStore.AddFunctions do
+  @moduledoc false
+
   use Spark.Dsl.Transformer
 
   @impl true

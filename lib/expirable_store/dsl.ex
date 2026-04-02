@@ -1,4 +1,6 @@
 defmodule ExpirableStore.Dsl do
+  @moduledoc false
+
   defmodule Expirable do
     defstruct [:name, :fetch, :refresh, :scope, :keyed, :__spark_metadata__]
   end
