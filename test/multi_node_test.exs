@@ -30,7 +30,7 @@ defmodule ExpirableStore.MultiNodeTest do
 
     test "updates are synchronized across nodes", %{node2: node2} do
       {:ok, token1, _} = TestExpirables.fetch(:cluster_lazy)
-      Process.sleep(1050)
+      Process.sleep(840)
 
       {:ok, token2, _} = TestExpirables.fetch(:cluster_lazy)
       assert token2 != token1
@@ -75,7 +75,7 @@ defmodule ExpirableStore.MultiNodeTest do
     test "concurrent updates are safe", %{node2: node2} do
       {:ok, _, _} = TestExpirables.fetch(:cluster_lazy)
       assert_receive {:fetch, :cluster_lazy, _}
-      Process.sleep(1050)
+      Process.sleep(840)
 
       task1 = Task.async(fn -> :erpc.call(node2, TestExpirables, :fetch, [:cluster_lazy]) end)
       task2 = Task.async(fn -> TestExpirables.fetch(:cluster_lazy) end)
@@ -109,8 +109,8 @@ defmodule ExpirableStore.MultiNodeTest do
       # Create replica on node2
       {:ok, _, _} = :erpc.call(node2, TestExpirables, :fetch, [:cluster_eager])
 
-      # Wait for eager refresh to complete: 1000ms * 0.9 delay + 250ms fetch + 50ms margin = 1200ms
-      Process.sleep(1200)
+      # Wait for eager refresh to complete: 800ms * 0.9 delay + 200ms fetch + 40ms margin = 960ms
+      Process.sleep(960)
       assert_receive {:fetch, :cluster_eager, _}
 
       # Both nodes should have the new token
@@ -199,8 +199,8 @@ defmodule ExpirableStore.MultiNodeTest do
       {:ok, token1, _} = TestExpirables.fetch(:local_eager)
       assert_receive {:fetch, :local_eager, _}
 
-      # Wait for eager refresh to complete: 1000ms * 0.9 delay + 250ms fetch + 50ms margin = 1200ms
-      Process.sleep(1200)
+      # Wait for eager refresh to complete: 800ms * 0.9 delay + 200ms fetch + 40ms margin = 960ms
+      Process.sleep(960)
       assert_receive {:fetch, :local_eager, _}
 
       {:ok, token2, _} = TestExpirables.fetch(:local_eager)
@@ -282,7 +282,7 @@ defmodule ExpirableStore.MultiNodeTest do
       :ok
     else
       if attempts > 0 do
-        Process.sleep(50)
+        Process.sleep(40)
         wait_until(fun, attempts - 1)
       else
         raise "wait_until timeout"
