@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.7.1 (2026-04-03)
+
+- Fix `.formatter.exs` to use correct DSL option name `require_initial_state` (was `require_init`)
+
 ## v0.7.0 (2026-04-03)
 
 - **Breaking**: Remove per-name generated functions (`name()`, `name!()`, `name(key)`, `name!(key)`, `init_name/1,2`) — use generic functions instead
