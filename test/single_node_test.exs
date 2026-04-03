@@ -498,13 +498,31 @@ defmodule ExpirableStore.SingleNodeTest do
   # require_initial_state
   # ===========================================================================
 
+  describe "put_state / update_state" do
+    test "put_state replaces state entirely" do
+      TestExpirables.put_state(:stateful_counter, 10)
+      {:ok, "stateful_counter_11", _} = TestExpirables.fetch(:stateful_counter)
+    end
+
+    test "update_state transforms existing state" do
+      TestExpirables.put_state(:stateful_counter, 5)
+      TestExpirables.update_state(:stateful_counter, fn n -> n * 2 end)
+      {:ok, "stateful_counter_11", _} = TestExpirables.fetch(:stateful_counter)
+    end
+
+    test "update_state receives nil when no state exists" do
+      TestExpirables.update_state(:stateful_counter, fn nil -> 99 end)
+      {:ok, "stateful_counter_100", _} = TestExpirables.fetch(:stateful_counter)
+    end
+  end
+
   describe "require_initial_state (non-keyed)" do
-    test "fetch returns {:error, :state_required} before set_state" do
+    test "fetch returns {:error, :state_required} before put_state" do
       {:error, :state_required} = TestExpirables.fetch(:require_init_example)
     end
 
-    test "fetch works after set_state" do
-      TestExpirables.set_state(:require_init_example, %{token_prefix: "hello"})
+    test "fetch works after put_state" do
+      TestExpirables.put_state(:require_init_example, %{token_prefix: "hello"})
 
       {:ok, token, _} = TestExpirables.fetch(:require_init_example)
       assert_receive {:fetch, :require_init_example, %{token_prefix: "hello"}, _}
@@ -512,7 +530,7 @@ defmodule ExpirableStore.SingleNodeTest do
     end
 
     test "clear requires re-init" do
-      TestExpirables.set_state(:require_init_example, %{token_prefix: "abc"})
+      TestExpirables.put_state(:require_init_example, %{token_prefix: "abc"})
       {:ok, _, _} = TestExpirables.fetch(:require_init_example)
 
       TestExpirables.clear(:require_init_example)
@@ -522,12 +540,12 @@ defmodule ExpirableStore.SingleNodeTest do
   end
 
   describe "require_initial_state (keyed)" do
-    test "fetch returns {:error, :state_required} before set_state" do
+    test "fetch returns {:error, :state_required} before put_state" do
       {:error, :state_required} = TestExpirables.fetch(:require_init_keyed, "k1")
     end
 
-    test "fetch works after set_state" do
-      TestExpirables.set_state(:require_init_keyed, "k1", %{token_prefix: "hello"})
+    test "fetch works after put_state" do
+      TestExpirables.put_state(:require_init_keyed, "k1", %{token_prefix: "hello"})
 
       {:ok, token, _} = TestExpirables.fetch(:require_init_keyed, "k1")
       assert_receive {:fetch, :require_init_keyed, "k1", %{token_prefix: "hello"}, _}
@@ -535,8 +553,8 @@ defmodule ExpirableStore.SingleNodeTest do
     end
 
     test "different keys are independent" do
-      TestExpirables.set_state(:require_init_keyed, "k1", %{token_prefix: "one"})
-      TestExpirables.set_state(:require_init_keyed, "k2", %{token_prefix: "two"})
+      TestExpirables.put_state(:require_init_keyed, "k1", %{token_prefix: "one"})
+      TestExpirables.put_state(:require_init_keyed, "k2", %{token_prefix: "two"})
 
       {:ok, t1, _} = TestExpirables.fetch(:require_init_keyed, "k1")
       {:ok, t2, _} = TestExpirables.fetch(:require_init_keyed, "k2")
@@ -549,8 +567,8 @@ defmodule ExpirableStore.SingleNodeTest do
     end
 
     test "clear specific key requires re-init for that key only" do
-      TestExpirables.set_state(:require_init_keyed, "k1", %{token_prefix: "one"})
-      TestExpirables.set_state(:require_init_keyed, "k2", %{token_prefix: "two"})
+      TestExpirables.put_state(:require_init_keyed, "k1", %{token_prefix: "one"})
+      TestExpirables.put_state(:require_init_keyed, "k2", %{token_prefix: "two"})
       {:ok, _, _} = TestExpirables.fetch(:require_init_keyed, "k1")
       {:ok, _, _} = TestExpirables.fetch(:require_init_keyed, "k2")
 

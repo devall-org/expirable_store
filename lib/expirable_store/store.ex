@@ -9,14 +9,24 @@ defmodule ExpirableStore.Store do
   # Public API
   # ===========================================================================
 
-  def set_state(module, name, state, scope) do
+  def put_state(module, name, state, scope) do
     group = make_group(scope, module, name)
-    do_set_state(group, state, scope)
+    do_update_state(group, fn _ -> state end, scope)
   end
 
-  def set_state(module, name, key, state, scope) do
+  def put_state(module, name, key, state, scope) do
     group = make_group(scope, module, name, key)
-    do_set_state(group, state, scope)
+    do_update_state(group, fn _ -> state end, scope)
+  end
+
+  def update_state(module, name, fun, scope) do
+    group = make_group(scope, module, name)
+    do_update_state(group, fun, scope)
+  end
+
+  def update_state(module, name, key, fun, scope) do
+    group = make_group(scope, module, name, key)
+    do_update_state(group, fun, scope)
   end
 
   def fetch(module, name, fetch_fn, refresh, scope, require_init) do
@@ -87,15 +97,15 @@ defmodule ExpirableStore.Store do
     :global.trans({group, self()}, fun, [node()])
   end
 
-  defp do_set_state(group, init_state, scope) do
+  defp do_update_state(group, fun, scope) do
     global_trans(group, scope, fn ->
       local_pid = get_local_agent(group)
 
       if is_nil(local_pid) or not Process.alive?(local_pid) do
-        start_agent(group, {:not_fetched, init_state}, scope)
+        start_agent(group, {:not_fetched, fun.(nil)}, scope)
         :ok
       else
-        Agent.update(local_pid, fn {cached_result, _old_state} -> {cached_result, init_state} end)
+        Agent.update(local_pid, fn {cached_result, old_state} -> {cached_result, fun.(old_state)} end)
         :ok
       end
     end)

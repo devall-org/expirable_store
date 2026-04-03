@@ -4,18 +4,18 @@
 
 - **Breaking**: Remove per-name generated functions (`name()`, `name!()`, `name(key)`, `name!(key)`, `init_name/1,2`) — use generic functions instead
 - **Breaking**: Rename `require_init` DSL option to `require_initial_state`
-- **Breaking**: Rename `init/2,3` to `set_state/2,3` — can be called at any time to update state
+- **Breaking**: Rename `init/2,3` to `put_state/2,3` (replaces state) and add `update_state/2,3` (transforms state via function)
 - **Breaking**: `fetch/2,3` now returns `{:error, reason}` instead of bare `:error`
   - `{:error, :fetch_failed}` — the fetch function returned an error
-  - `{:error, :state_required}` — `require_initial_state: true` and `set_state` has not been called
+  - `{:error, :state_required}` — `require_initial_state: true` and `put_state`/`update_state` has not been called
 - Add compile-time name validation — `require MyApp.Expirables` to get `CompileError` for unknown names and keyed/unkeyed arity mismatches at build time
 
 Migration:
 - `MyApp.Expirables.oauth_token()` → `MyApp.Expirables.fetch(:oauth_token)`
 - `MyApp.Expirables.oauth_token!()` → `MyApp.Expirables.fetch!(:oauth_token)`
-- `MyApp.Expirables.init_oauth_token(state)` → `MyApp.Expirables.set_state(:oauth_token, state)`
+- `MyApp.Expirables.init_oauth_token(state)` → `MyApp.Expirables.put_state(:oauth_token, state)`
 - `require_init true` → `require_initial_state true`
-- `init(name, state)` → `set_state(name, state)`
+- `init(name, state)` → `put_state(name, state)`
 - `:error = fetch(name)` → `{:error, _} = fetch(name)` (or match on specific reason)
 
 ## v0.6.0 (2026-04-02)

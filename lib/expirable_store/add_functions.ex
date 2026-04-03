@@ -58,14 +58,24 @@ defmodule ExpirableStore.AddFunctions do
           quote do: ExpirableStore.fetch!(unquote(@__expirable_store_module__), unquote(name), unquote(key))
         end
 
-        defmacro set_state(name, state) do
-          __validate_expirable__!(name, @__all_expirable_names__, @__unkeyed_expirable_names__, __CALLER__, "is keyed; use set_state/3 with a key argument")
-          quote do: ExpirableStore.set_state(unquote(@__expirable_store_module__), unquote(name), unquote(state))
+        defmacro put_state(name, state) do
+          __validate_expirable__!(name, @__all_expirable_names__, @__unkeyed_expirable_names__, __CALLER__, "is keyed; use put_state/3 with a key argument")
+          quote do: ExpirableStore.put_state(unquote(@__expirable_store_module__), unquote(name), unquote(state))
         end
 
-        defmacro set_state(name, key, state) do
-          __validate_expirable__!(name, @__all_expirable_names__, @__keyed_expirable_names__, __CALLER__, "is not keyed; use set_state/2 without a key argument")
-          quote do: ExpirableStore.set_state(unquote(@__expirable_store_module__), unquote(name), unquote(key), unquote(state))
+        defmacro put_state(name, key, state) do
+          __validate_expirable__!(name, @__all_expirable_names__, @__keyed_expirable_names__, __CALLER__, "is not keyed; use put_state/2 without a key argument")
+          quote do: ExpirableStore.put_state(unquote(@__expirable_store_module__), unquote(name), unquote(key), unquote(state))
+        end
+
+        defmacro update_state(name, fun) do
+          __validate_expirable__!(name, @__all_expirable_names__, @__unkeyed_expirable_names__, __CALLER__, "is keyed; use update_state/3 with a key argument")
+          quote do: ExpirableStore.update_state(unquote(@__expirable_store_module__), unquote(name), unquote(fun))
+        end
+
+        defmacro update_state(name, key, fun) do
+          __validate_expirable__!(name, @__all_expirable_names__, @__keyed_expirable_names__, __CALLER__, "is not keyed; use update_state/2 without a key argument")
+          quote do: ExpirableStore.update_state(unquote(@__expirable_store_module__), unquote(name), unquote(key), unquote(fun))
         end
 
         defmacro clear(name) do

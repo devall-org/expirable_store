@@ -71,12 +71,13 @@ MyApp.Expirables.fetch!(:github_access_token)  # value or raises
 MyApp.Expirables.clear(:github_access_token)
 MyApp.Expirables.clear_all()
 
-# require_initial_state: must call set_state before fetch
-MyApp.Expirables.set_state(:oauth_token, %{refresh_token: get_from_db()})
+# require_initial_state: must call put_state before fetch
+MyApp.Expirables.put_state(:oauth_token, %{refresh_token: get_from_db()})
 MyApp.Expirables.fetch(:oauth_token)           # {:ok, access_token, expires_at} or {:error, :state_required}
 
 # Keyed + require_initial_state
-MyApp.Expirables.set_state(:tenant_api_key, "t1", %{secret: get_secret()})
+MyApp.Expirables.put_state(:tenant_api_key, "t1", %{secret: get_secret()})
+MyApp.Expirables.update_state(:tenant_api_key, "t1", fn old -> Map.put(old, :rotated, true) end)
 MyApp.Expirables.fetch(:tenant_api_key, "t1")  # {:ok, value, expires_at} or {:error, reason}
 MyApp.Expirables.fetch!(:tenant_api_key, "t1") # value or raises
 MyApp.Expirables.clear(:tenant_api_key, "t1")  # specific key
@@ -89,15 +90,15 @@ MyApp.Expirables.clear(:tenant_api_key)        # all keys
 |--------|--------|---------|-------------|
 | `fetch` | `fn state -> {:ok, value, expires_at, next_state} \| {:error, next_state} end` | *required* | Stateful fetch. Use 2-arity `fn key, state -> ... end` when `keyed: true`. `expires_at` is Unix ms or `:infinity` |
 | `keyed` | `true`, `false` | `false` | When `true`, each unique key gets its own independent cache entry, state, and timer |
-| `require_initial_state` | `true`, `false` | `false` | When `true`, `set_state` must be called before fetch works. Use when the fetch function cannot produce a valid initial state on its own (e.g. needs a refresh token from the database) |
+| `require_initial_state` | `true`, `false` | `false` | When `true`, `put_state` must be called before fetch works. Use when the fetch function cannot produce a valid initial state on its own (e.g. needs a refresh token from the database) |
 | `refresh` | `:lazy`, `{:eager, before_expiry: ms}` | `:lazy` | Refresh strategy |
 | `scope` | `:cluster`, `:local` | `:cluster` | Scope of the store |
 
-- **Fetch state**: state starts as `nil` when `require_initial_state: false` (default); the fetch function receives `nil` on the first call and can initialize state itself. When `require_initial_state: true`, fetch is blocked until `set_state` is called
+- **Fetch state**: state starts as `nil` when `require_initial_state: false` (default); the fetch function receives `nil` on the first call and can initialize state itself. When `require_initial_state: true`, fetch is blocked until `put_state` is called
 - **Refresh**: `:lazy` refreshes on next fetch after expiry; `{:eager, before_expiry: ms}` refreshes in background before expiry (no-op for `:infinity`)
 - **Scope**: `:cluster` replicates across nodes via `:pg`; `:local` is node-local only
 - **Keyed**: key can be any Erlang term; number of keys need not be known at compile time
-- **require_initial_state**: fetch returns `{:error, :state_required}` until `set_state` is called; after `clear`, `set_state` is required again
+- **require_initial_state**: fetch returns `{:error, :state_required}` until `put_state` or `update_state` is called; after `clear`, it is required again
 - **Compile-time validation**: all public functions are macros — `require` the module to catch unknown names or keyed/unkeyed arity mismatches at compile time
 
 ## Key Behaviors
@@ -106,7 +107,7 @@ MyApp.Expirables.clear(:tenant_api_key)        # all keys
 - `expires_at` must be a Unix timestamp in milliseconds or `:infinity`
 - Expirable names are compile-time atoms; keys are runtime values
 - `clear(name)` on a keyed expirable clears all keys for that name
-- `clear` destroys agent — `require_initial_state: true` expirables need `set_state` again after clear
+- `clear` destroys agent — `require_initial_state: true` expirables need `put_state` again after clear
 
 ## When to Use
 

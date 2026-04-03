@@ -9,27 +9,51 @@ defmodule ExpirableStore do
   use Spark.Dsl, default_extensions: [extensions: [ExpirableStore.Dsl]]
 
   @doc """
-  Set the state for an expirable. Can be called at any time to update state.
+  Sets the state for an expirable, replacing any existing state.
 
   Required before `fetch/2` when the expirable has `require_initial_state: true`.
   """
-  def set_state(module, name, state) do
+  def put_state(module, name, state) do
     %{scope: scope} =
       ExpirableStore.Info.expirables(module) |> Enum.find(fn e -> e.name == name end)
 
-    ExpirableStore.Store.set_state(module, name, state, scope)
+    ExpirableStore.Store.put_state(module, name, state, scope)
   end
 
   @doc """
-  Set the state for a keyed expirable. Can be called at any time to update state.
+  Sets the state for a keyed expirable, replacing any existing state.
 
   Required before `fetch/3` when the expirable has `require_initial_state: true`.
   """
-  def set_state(module, name, key, state) do
+  def put_state(module, name, key, state) do
     %{scope: scope} =
       ExpirableStore.Info.expirables(module) |> Enum.find(fn e -> e.name == name end)
 
-    ExpirableStore.Store.set_state(module, name, key, state, scope)
+    ExpirableStore.Store.put_state(module, name, key, state, scope)
+  end
+
+  @doc """
+  Updates the state for an expirable by applying `fun` to the current state.
+
+  `fun` receives the current state (or `nil` if no state exists) and must return the new state.
+  """
+  def update_state(module, name, fun) do
+    %{scope: scope} =
+      ExpirableStore.Info.expirables(module) |> Enum.find(fn e -> e.name == name end)
+
+    ExpirableStore.Store.update_state(module, name, fun, scope)
+  end
+
+  @doc """
+  Updates the state for a keyed expirable by applying `fun` to the current state.
+
+  `fun` receives the current state (or `nil` if no state exists) and must return the new state.
+  """
+  def update_state(module, name, key, fun) do
+    %{scope: scope} =
+      ExpirableStore.Info.expirables(module) |> Enum.find(fn e -> e.name == name end)
+
+    ExpirableStore.Store.update_state(module, name, key, fun, scope)
   end
 
   @doc """
@@ -37,7 +61,7 @@ defmodule ExpirableStore do
 
   Returns `{:ok, value, expires_at}` on success.
   Returns `{:error, :fetch_failed}` when the fetch function failed.
-  Returns `{:error, :state_required}` when `require_initial_state: true` and `set_state` has not been called.
+  Returns `{:error, :state_required}` when `require_initial_state: true` and `put_state` has not been called.
   """
   def fetch(module, name) do
     %{fetch: fetch_fn, scope: scope, refresh: refresh, require_initial_state: require_initial_state} =
@@ -55,7 +79,7 @@ defmodule ExpirableStore do
 
   Returns `{:ok, value, expires_at}` on success.
   Returns `{:error, :fetch_failed}` when the fetch function failed.
-  Returns `{:error, :state_required}` when `require_initial_state: true` and `set_state` has not been called.
+  Returns `{:error, :state_required}` when `require_initial_state: true` and `put_state` has not been called.
   """
   def fetch(module, name, key) do
     %{fetch: fetch_fn, scope: scope, refresh: refresh, require_initial_state: require_initial_state} =

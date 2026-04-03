@@ -94,12 +94,12 @@ token = MyApp.Expirables.fetch!(:github_access_token)
 MyApp.Expirables.clear(:github_access_token)
 MyApp.Expirables.clear_all()
 
-# require_initial_state: must call set_state before fetch
-MyApp.Expirables.set_state(:oauth_token, %{refresh_token: get_from_db()})
+# require_initial_state: must call put_state before fetch
+MyApp.Expirables.put_state(:oauth_token, %{refresh_token: get_from_db()})
 {:ok, access_token, _} = MyApp.Expirables.fetch(:oauth_token)
 
 # Keyed + require_initial_state
-MyApp.Expirables.set_state(:tenant_api_key, "tenant_123", %{secret: get_secret()})
+MyApp.Expirables.put_state(:tenant_api_key, "tenant_123", %{secret: get_secret()})
 {:ok, key, _} = MyApp.Expirables.fetch(:tenant_api_key, "tenant_123")
 MyApp.Expirables.clear(:tenant_api_key, "tenant_123")  # clear specific key
 MyApp.Expirables.clear(:tenant_api_key)                 # clear all keys
@@ -111,7 +111,7 @@ MyApp.Expirables.clear(:tenant_api_key)                 # clear all keys
 |--------|--------|---------|-------------|
 | `fetch` | `fn state -> {:ok, value, expires_at, next_state} \| {:error, next_state} end` | *required* | Stateful fetch function. Use 2-arity `fn key, state -> ... end` when `keyed: true`. `expires_at` is Unix ms or `:infinity` |
 | `keyed` | `true`, `false` | `false` | When `true`, each unique key gets its own independent cache entry and timer |
-| `require_initial_state` | `true`, `false` | `false` | When `true`, `set_state` must be called before fetch works. Use when the fetch function cannot produce a valid initial state on its own |
+| `require_initial_state` | `true`, `false` | `false` | When `true`, `put_state` must be called before fetch works. Use when the fetch function cannot produce a valid initial state on its own |
 | `refresh` | `:lazy`, `{:eager, before_expiry: ms}` | `:lazy` | Refresh strategy |
 | `scope` | `:cluster`, `:local` | `:cluster` | Scope of the store |
 
@@ -141,18 +141,18 @@ The fetch function receives a `state` argument and must return `next_state`. Sta
 
 Two patterns:
 - **Self-initializing** (`require_initial_state: false`, default): fetch receives `nil` on the first call and can create its own initial state
-- **Externally-initialized** (`require_initial_state: true`): fetch is blocked until `set_state` is called — use when the fetch function needs external data (e.g., a refresh token from the database) to start
+- **Externally-initialized** (`require_initial_state: true`): fetch is blocked until `put_state` is called — use when the fetch function needs external data (e.g., a refresh token from the database) to start
 
 ### require_initial_state
 
 When `require_initial_state: true`, you must provide an initial state before fetch works:
 
 ```elixir
-# Must call set_state before fetch — otherwise fetch returns :error
-MyApp.Expirables.set_state(:oauth_token, %{refresh_token: get_from_db()})
+# Must call put_state before fetch — otherwise fetch returns :error
+MyApp.Expirables.put_state(:oauth_token, %{refresh_token: get_from_db()})
 {:ok, token, _} = MyApp.Expirables.fetch(:oauth_token)
 
-# After clear, set_state is required again
+# After clear, put_state is required again
 MyApp.Expirables.clear(:oauth_token)
 {:error, :state_required} = MyApp.Expirables.fetch(:oauth_token)
 ```
@@ -161,7 +161,8 @@ MyApp.Expirables.clear(:oauth_token)
 
 - `fetch(name)` / `fetch(name, key)` — returns `{:ok, value, expires_at}`, `{:error, :fetch_failed}`, or `{:error, :state_required}`
 - `fetch!(name)` / `fetch!(name, key)` — returns value or raises
-- `set_state(name, state)` / `set_state(name, key, state)` — sets state; can be called at any time
+- `put_state(name, state)` / `put_state(name, key, state)` — replaces state with a new value
+- `update_state(name, fun)` / `update_state(name, key, fun)` — updates state via `fn old_state -> new_state end`
 - `clear(name)` / `clear(name, key)`
 - `clear_all()`
 
