@@ -13,16 +13,15 @@ Perfect for caching OAuth tokens, API keys, and other time-sensitive data that s
 - **Flexible scoping**: Cluster-wide replication or node-local storage
 - **Refresh strategies**: Lazy (on-demand) or eager (background pre-refresh)
 - **Keyed expirables**: Same logic, independent cache and timer per runtime key
-- **Runtime init**: `require_init` option for injecting runtime values before first fetch
+- **Runtime state injection**: `require_initial_state` option for providing external state before first fetch
 - **Concurrency-safe**: Concurrent access protected by `:global.trans/2`
 - **Clean DSL**: [Spark](https://github.com/ash-project/spark)-based compile-time configuration
-- **Named functions**: Auto-generated functions for each expirable
 
 ## Installation
 
 ```elixir
 def deps do
-  [{:expirable_store, "~> 0.6.0"}]
+  [{:expirable_store, "~> 0.7.0"}]
 end
 ```
 
@@ -56,7 +55,7 @@ defmodule MyApp.Expirables do
     refresh {:eager, before_expiry: :timer.seconds(30)}
   end
 
-  # Stateful: state persists across fetch calls
+  # Stateful + externally initialized: state must be provided before first fetch
   expirable :oauth_token do
     fetch fn state ->
       refresh_token = state.refresh_token
@@ -64,12 +63,12 @@ defmodule MyApp.Expirables do
       expires_at = System.system_time(:millisecond) + :timer.hours(1)
       {:ok, access_token, expires_at, %{state | refresh_token: new_refresh_token}}
     end
-    require_init true
+    require_initial_state true
     scope :cluster
     refresh {:eager, before_expiry: :timer.minutes(5)}
   end
 
-  # Keyed + require_init: per-tenant credentials with runtime init
+  # Keyed + require_initial_state: per-tenant credentials with runtime state
   expirable :tenant_api_key do
     fetch fn tenant_id, state ->
       api_key = ExternalAPI.rotate_key(tenant_id, state.secret)
@@ -77,7 +76,7 @@ defmodule MyApp.Expirables do
       {:ok, api_key, expires_at, state}
     end
     keyed true
-    require_init true
+    require_initial_state true
     scope :cluster
     refresh :lazy
   end
@@ -85,22 +84,19 @@ end
 ```
 
 ```elixir
-# Non-keyed: named functions (recommended)
-{:ok, token, expires_at} = MyApp.Expirables.github_access_token()
-token = MyApp.Expirables.github_access_token!()
-
-# Non-keyed: generic functions
+# Fetch
 {:ok, token, _} = MyApp.Expirables.fetch(:github_access_token)
+token = MyApp.Expirables.fetch!(:github_access_token)
 MyApp.Expirables.clear(:github_access_token)
 MyApp.Expirables.clear_all()
 
-# require_init: must init before fetch
-MyApp.Expirables.init_oauth_token(%{refresh_token: get_from_db()})
-{:ok, access_token, _} = MyApp.Expirables.oauth_token()
+# require_initial_state: must call set_state before fetch
+MyApp.Expirables.set_state(:oauth_token, %{refresh_token: get_from_db()})
+{:ok, access_token, _} = MyApp.Expirables.fetch(:oauth_token)
 
-# Keyed + require_init
-MyApp.Expirables.init(:tenant_api_key, "tenant_123", %{secret: get_secret()})
-{:ok, key, _} = MyApp.Expirables.tenant_api_key("tenant_123")
+# Keyed + require_initial_state
+MyApp.Expirables.set_state(:tenant_api_key, "tenant_123", %{secret: get_secret()})
+{:ok, key, _} = MyApp.Expirables.fetch(:tenant_api_key, "tenant_123")
 MyApp.Expirables.clear(:tenant_api_key, "tenant_123")  # clear specific key
 MyApp.Expirables.clear(:tenant_api_key)                 # clear all keys
 ```
@@ -111,7 +107,7 @@ MyApp.Expirables.clear(:tenant_api_key)                 # clear all keys
 |--------|--------|---------|-------------|
 | `fetch` | `fn state -> {:ok, value, expires_at, next_state} \| {:error, next_state} end` | *required* | Stateful fetch function. Use 2-arity `fn key, state -> ... end` when `keyed: true`. `expires_at` is Unix ms or `:infinity` |
 | `keyed` | `true`, `false` | `false` | When `true`, each unique key gets its own independent cache entry and timer |
-| `require_init` | `true`, `false` | `false` | When `true`, `init` must be called with initial state before fetch works |
+| `require_initial_state` | `true`, `false` | `false` | When `true`, `set_state` must be called before fetch works. Use when the fetch function cannot produce a valid initial state on its own |
 | `refresh` | `:lazy`, `{:eager, before_expiry: ms}` | `:lazy` | Refresh strategy |
 | `scope` | `:cluster`, `:local` | `:cluster` | Scope of the store |
 
@@ -130,45 +126,39 @@ MyApp.Expirables.clear(:tenant_api_key)                 # clear all keys
 When `keyed: true`, the fetch function receives the key as its first argument and state as its second. Each unique key has its own independent Agent, state, and refresh timer. The key can be any Erlang term:
 
 ```elixir
-MyApp.Expirables.tenant_api_key("tenant_123")        # string
-MyApp.Expirables.tenant_api_key(:tenant_a)            # atom
-MyApp.Expirables.tenant_api_key({:org, 42})           # tuple
+MyApp.Expirables.fetch(:tenant_api_key, "tenant_123")  # string
+MyApp.Expirables.fetch(:tenant_api_key, :tenant_a)     # atom
+MyApp.Expirables.fetch(:tenant_api_key, {:org, 42})    # tuple
 ```
 
 ### Stateful Fetch
 
-The fetch function receives a `state` argument and must return `next_state`. State is persisted in the Agent and passed to subsequent fetch calls (e.g., on expiry refresh). When `require_init: false` (default), state starts as `nil`.
+The fetch function receives a `state` argument and must return `next_state`. State is persisted in the Agent and passed to subsequent fetch calls (e.g., on expiry refresh).
 
-### require_init
+Two patterns:
+- **Self-initializing** (`require_initial_state: false`, default): fetch receives `nil` on the first call and can create its own initial state
+- **Externally-initialized** (`require_initial_state: true`): fetch is blocked until `set_state` is called — use when the fetch function needs external data (e.g., a refresh token from the database) to start
 
-When `require_init: true`, the expirable must be initialized at runtime before fetch works. This allows injecting runtime values (e.g., DB lookups, config) into the fetch state:
+### require_initial_state
+
+When `require_initial_state: true`, you must provide an initial state before fetch works:
 
 ```elixir
-# Must call init before fetch — otherwise fetch returns :error
-MyApp.Expirables.init_oauth_token(%{refresh_token: get_from_db()})
-{:ok, token, _} = MyApp.Expirables.oauth_token()
+# Must call set_state before fetch — otherwise fetch returns :error
+MyApp.Expirables.set_state(:oauth_token, %{refresh_token: get_from_db()})
+{:ok, token, _} = MyApp.Expirables.fetch(:oauth_token)
 
-# After clear, init is required again
+# After clear, set_state is required again
 MyApp.Expirables.clear(:oauth_token)
 :error = MyApp.Expirables.fetch(:oauth_token)
 ```
 
-## Generated Functions
-
-For `expirable :name` (`keyed: false`):
-- `name()` / `name!()` — fetch value or raise
-
-For `expirable :name` (`keyed: true`):
-- `name(key)` / `name!(key)` — fetch value for key or raise
-
-For `expirable :name` (`require_init: true`):
-- `init_name(state)` — initialize state (non-keyed)
-- `init_name(key, state)` — initialize state (keyed)
+## API
 
 Generic functions (always available):
-- `fetch(name)` / `fetch(name, key)`
-- `fetch!(name)` / `fetch!(name, key)`
-- `init(name, state)` / `init(name, key, state)`
+- `fetch(name)` / `fetch(name, key)` — returns `{:ok, value, expires_at}`, `{:error, :fetch_failed}`, or `{:error, :state_required}`
+- `fetch!(name)` / `fetch!(name, key)` — returns value or raises
+- `set_state(name, state)` / `set_state(name, key, state)` — sets state; can be called at any time
 - `clear(name)` / `clear(name, key)`
 - `clear_all()`
 

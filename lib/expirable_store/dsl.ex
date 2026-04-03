@@ -2,7 +2,7 @@ defmodule ExpirableStore.Dsl do
   @moduledoc false
 
   defmodule Expirable do
-    defstruct [:name, :fetch, :refresh, :scope, :keyed, :require_init, :__spark_metadata__]
+    defstruct [:name, :fetch, :refresh, :scope, :keyed, :require_initial_state, :__spark_metadata__]
   end
 
   @expirable %Spark.Dsl.Entity{
@@ -46,12 +46,12 @@ defmodule ExpirableStore.Dsl do
         default: :cluster,
         doc: ":cluster (replicated across nodes) or :local (node-local only)"
       ],
-      require_init: [
+      require_initial_state: [
         type: :boolean,
         required: false,
         default: false,
         doc:
-          "When true, init/2 (or init/3 for keyed) must be called with initial state before fetch works. Allows runtime value injection into the fetch state."
+          "When true, set_initial_state/2 (or set_initial_state/3 for keyed) must be called before fetch works. Use this when the fetch function cannot produce a valid initial state on its own (e.g. needs a refresh token from the database). When false (default), the fetch function receives nil on the first call and can initialize state itself."
       ]
     ]
   }

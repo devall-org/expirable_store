@@ -9,54 +9,65 @@ defmodule ExpirableStore do
   use Spark.Dsl, default_extensions: [extensions: [ExpirableStore.Dsl]]
 
   @doc """
-  Initialize the state for an expirable that has `require_init: true`.
+  Set the state for an expirable. Can be called at any time to update state.
 
-  Must be called before `fetch/2` for the given expirable.
+  Required before `fetch/2` when the expirable has `require_initial_state: true`.
   """
-  def init(module, name, init_state) do
+  def set_state(module, name, state) do
     %{scope: scope} =
       ExpirableStore.Info.expirables(module) |> Enum.find(fn e -> e.name == name end)
 
-    ExpirableStore.Store.init(module, name, init_state, scope)
+    ExpirableStore.Store.set_state(module, name, state, scope)
   end
 
   @doc """
-  Initialize the state for a keyed expirable that has `require_init: true`.
+  Set the state for a keyed expirable. Can be called at any time to update state.
 
-  Must be called before `fetch/3` for the given key.
+  Required before `fetch/3` when the expirable has `require_initial_state: true`.
   """
-  def init(module, name, key, init_state) do
+  def set_state(module, name, key, state) do
     %{scope: scope} =
       ExpirableStore.Info.expirables(module) |> Enum.find(fn e -> e.name == name end)
 
-    ExpirableStore.Store.init(module, name, key, init_state, scope)
+    ExpirableStore.Store.set_state(module, name, key, state, scope)
   end
 
   @doc """
-  Fetch a stored value, returning `{:ok, value, expires_at}` on success or `:error` on failure.
+  Fetch a stored value.
 
-  The fetch function receives state and must return `{:ok, value, expires_at, next_state}`
-  or `{:error, next_state}`.
+  Returns `{:ok, value, expires_at}` on success.
+  Returns `{:error, :fetch_failed}` when the fetch function failed.
+  Returns `{:error, :state_required}` when `require_initial_state: true` and `set_state` has not been called.
   """
   def fetch(module, name) do
-    %{fetch: fetch_fn, scope: scope, refresh: refresh, require_init: require_init} =
+    %{fetch: fetch_fn, scope: scope, refresh: refresh, require_initial_state: require_initial_state} =
       ExpirableStore.Info.expirables(module) |> Enum.find(fn e -> e.name == name end)
 
-    ExpirableStore.Store.fetch(module, name, fetch_fn, refresh, scope, require_init)
+    case ExpirableStore.Store.fetch(module, name, fetch_fn, refresh, scope, require_initial_state) do
+      {:ok, _, _} = ok -> ok
+      :error -> {:error, :fetch_failed}
+      {:error, :state_required} = err -> err
+    end
   end
 
   @doc """
   Fetch a keyed expirable value for the given key.
 
-  Returns `{:ok, value, expires_at}` on success or `:error` on failure.
-  Each unique key has its own independent cache entry and timer.
+  Returns `{:ok, value, expires_at}` on success.
+  Returns `{:error, :fetch_failed}` when the fetch function failed.
+  Returns `{:error, :state_required}` when `require_initial_state: true` and `set_state` has not been called.
   """
   def fetch(module, name, key) do
-    %{fetch: fetch_fn, scope: scope, refresh: refresh, require_init: require_init} =
+    %{fetch: fetch_fn, scope: scope, refresh: refresh, require_initial_state: require_initial_state} =
       ExpirableStore.Info.expirables(module) |> Enum.find(fn e -> e.name == name end)
 
     bound_fetch_fn = fn state -> fetch_fn.(key, state) end
-    ExpirableStore.Store.fetch(module, name, key, bound_fetch_fn, refresh, scope, require_init)
+
+    case ExpirableStore.Store.fetch(module, name, key, bound_fetch_fn, refresh, scope, require_initial_state) do
+      {:ok, _, _} = ok -> ok
+      :error -> {:error, :fetch_failed}
+      {:error, :state_required} = err -> err
+    end
   end
 
   @doc """
@@ -67,7 +78,7 @@ defmodule ExpirableStore do
   def fetch!(module, name) do
     case fetch(module, name) do
       {:ok, value, _expires_at} -> value
-      :error -> raise "Failed to fetch expirable: #{inspect(name)}"
+      {:error, reason} -> raise "Failed to fetch expirable: #{inspect(name)}, reason: #{inspect(reason)}"
     end
   end
 
@@ -79,7 +90,7 @@ defmodule ExpirableStore do
   def fetch!(module, name, key) do
     case fetch(module, name, key) do
       {:ok, value, _expires_at} -> value
-      :error -> raise "Failed to fetch expirable: #{inspect(name)} key=#{inspect(key)}"
+      {:error, reason} -> raise "Failed to fetch expirable: #{inspect(name)} key=#{inspect(key)}, reason: #{inspect(reason)}"
     end
   end
 

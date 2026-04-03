@@ -265,7 +265,7 @@ defmodule TestExpirables do
       {:ok, token, expires_at, state}
     end
 
-    require_init true
+    require_initial_state true
     refresh :lazy
     scope :cluster
   end
@@ -288,7 +288,7 @@ defmodule TestExpirables do
     end
 
     keyed true
-    require_init true
+    require_initial_state true
     refresh :lazy
     scope :cluster
   end

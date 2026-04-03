@@ -40,10 +40,10 @@ defmodule ExpirableStore.SingleNodeTest do
     end
 
     test "does not store fetch failures" do
-      :error = TestExpirables.fetch(:cluster_lazy_fail)
+      {:error, :fetch_failed} = TestExpirables.fetch(:cluster_lazy_fail)
       assert_receive {:fetch, :cluster_lazy_fail, _}
 
-      :error = TestExpirables.fetch(:cluster_lazy_fail)
+      {:error, :fetch_failed} = TestExpirables.fetch(:cluster_lazy_fail)
       assert_receive {:fetch, :cluster_lazy_fail, _}
     end
 
@@ -206,40 +206,11 @@ defmodule ExpirableStore.SingleNodeTest do
     end
   end
 
-  describe "named functions" do
-    test "cluster_lazy() returns same as fetch(:cluster_lazy)" do
-      {:ok, token1, exp1} = TestExpirables.cluster_lazy()
-      assert_receive {:fetch, :cluster_lazy, _}
-
-      {:ok, token2, exp2} = TestExpirables.fetch(:cluster_lazy)
-      refute_receive {:fetch, :cluster_lazy, _}
-
-      assert token1 == token2
-      assert exp1 == exp2
-    end
-
-    test "cluster_lazy!() returns same as fetch!(:cluster_lazy)" do
-      token = TestExpirables.cluster_lazy!()
-      assert_receive {:fetch, :cluster_lazy, _}
-      assert String.starts_with?(token, "cluster_lazy_")
-    end
-
-    test "cluster_lazy_fail!() raises on failure" do
-      assert_raise RuntimeError, fn -> TestExpirables.cluster_lazy_fail!() end
-    end
-
-    test "local_lazy() works for local scope" do
-      {:ok, token, _} = TestExpirables.local_lazy()
-      assert_receive {:fetch, :local_lazy, _}
-      assert String.starts_with?(token, "local_lazy_")
-    end
-  end
-
   describe "clear_all/0" do
     test "removes all values" do
       {:ok, token1, _} = TestExpirables.fetch(:cluster_lazy)
       {:ok, local1, _} = TestExpirables.fetch(:local_lazy)
-      :error = TestExpirables.fetch(:cluster_lazy_fail)
+      {:error, :fetch_failed} = TestExpirables.fetch(:cluster_lazy_fail)
 
       TestExpirables.clear_all()
 
@@ -302,10 +273,10 @@ defmodule ExpirableStore.SingleNodeTest do
 
   describe "keyed expirables (cluster, lazy)" do
     test "different keys are cached independently" do
-      {:ok, token_a, _} = TestExpirables.cluster_lazy_keyed("apple")
+      {:ok, token_a, _} = TestExpirables.fetch(:cluster_lazy_keyed, "apple")
       assert_receive {:fetch, :cluster_lazy_keyed, "apple", _}
 
-      {:ok, token_b, _} = TestExpirables.cluster_lazy_keyed("banana")
+      {:ok, token_b, _} = TestExpirables.fetch(:cluster_lazy_keyed, "banana")
       assert_receive {:fetch, :cluster_lazy_keyed, "banana", _}
 
       assert token_a != token_b
@@ -314,10 +285,10 @@ defmodule ExpirableStore.SingleNodeTest do
     end
 
     test "same key returns cached value" do
-      {:ok, token1, _} = TestExpirables.cluster_lazy_keyed("apple")
+      {:ok, token1, _} = TestExpirables.fetch(:cluster_lazy_keyed, "apple")
       assert_receive {:fetch, :cluster_lazy_keyed, "apple", _}
 
-      {:ok, token2, _} = TestExpirables.cluster_lazy_keyed("apple")
+      {:ok, token2, _} = TestExpirables.fetch(:cluster_lazy_keyed, "apple")
       refute_receive {:fetch, :cluster_lazy_keyed, "apple", _}
 
       assert token1 == token2
@@ -330,89 +301,73 @@ defmodule ExpirableStore.SingleNodeTest do
       assert length(:pg.get_members(:expirable_store, group_a)) == 0
       assert length(:pg.get_members(:expirable_store, group_b)) == 0
 
-      {:ok, _, _} = TestExpirables.cluster_lazy_keyed("apple")
+      {:ok, _, _} = TestExpirables.fetch(:cluster_lazy_keyed, "apple")
       assert length(:pg.get_members(:expirable_store, group_a)) == 1
       assert length(:pg.get_members(:expirable_store, group_b)) == 0
     end
 
     test "clear with key removes only that key" do
-      {:ok, token_a, _} = TestExpirables.cluster_lazy_keyed("apple")
-      {:ok, token_b, _} = TestExpirables.cluster_lazy_keyed("banana")
+      {:ok, token_a, _} = TestExpirables.fetch(:cluster_lazy_keyed, "apple")
+      {:ok, token_b, _} = TestExpirables.fetch(:cluster_lazy_keyed, "banana")
 
       TestExpirables.clear(:cluster_lazy_keyed, "apple")
 
-      {:ok, token_a2, _} = TestExpirables.cluster_lazy_keyed("apple")
-      {:ok, token_b2, _} = TestExpirables.cluster_lazy_keyed("banana")
+      {:ok, token_a2, _} = TestExpirables.fetch(:cluster_lazy_keyed, "apple")
+      {:ok, token_b2, _} = TestExpirables.fetch(:cluster_lazy_keyed, "banana")
 
       assert token_a2 != token_a
       assert token_b2 == token_b
     end
 
     test "clear without key removes all keys" do
-      {:ok, token_a, _} = TestExpirables.cluster_lazy_keyed("apple")
-      {:ok, token_b, _} = TestExpirables.cluster_lazy_keyed("banana")
+      {:ok, token_a, _} = TestExpirables.fetch(:cluster_lazy_keyed, "apple")
+      {:ok, token_b, _} = TestExpirables.fetch(:cluster_lazy_keyed, "banana")
 
       TestExpirables.clear(:cluster_lazy_keyed)
 
-      {:ok, token_a2, _} = TestExpirables.cluster_lazy_keyed("apple")
-      {:ok, token_b2, _} = TestExpirables.cluster_lazy_keyed("banana")
+      {:ok, token_a2, _} = TestExpirables.fetch(:cluster_lazy_keyed, "apple")
+      {:ok, token_b2, _} = TestExpirables.fetch(:cluster_lazy_keyed, "banana")
 
       assert token_a2 != token_a
       assert token_b2 != token_b
     end
 
     test "clear_all clears all keyed entries" do
-      {:ok, token_a, _} = TestExpirables.cluster_lazy_keyed("apple")
-      {:ok, token_b, _} = TestExpirables.cluster_lazy_keyed("banana")
+      {:ok, token_a, _} = TestExpirables.fetch(:cluster_lazy_keyed, "apple")
+      {:ok, token_b, _} = TestExpirables.fetch(:cluster_lazy_keyed, "banana")
 
       TestExpirables.clear_all()
 
-      {:ok, token_a2, _} = TestExpirables.cluster_lazy_keyed("apple")
-      {:ok, token_b2, _} = TestExpirables.cluster_lazy_keyed("banana")
+      {:ok, token_a2, _} = TestExpirables.fetch(:cluster_lazy_keyed, "apple")
+      {:ok, token_b2, _} = TestExpirables.fetch(:cluster_lazy_keyed, "banana")
 
       assert token_a2 != token_a
       assert token_b2 != token_b
     end
 
     test "expiration works independently per key" do
-      {:ok, token_a, _} = TestExpirables.cluster_lazy_keyed("apple")
+      {:ok, token_a, _} = TestExpirables.fetch(:cluster_lazy_keyed, "apple")
       assert_receive {:fetch, :cluster_lazy_keyed, "apple", _}
 
       Process.sleep(210)
 
-      {:ok, token_a2, _} = TestExpirables.cluster_lazy_keyed("apple")
+      {:ok, token_a2, _} = TestExpirables.fetch(:cluster_lazy_keyed, "apple")
       assert_receive {:fetch, :cluster_lazy_keyed, "apple", _}
       assert token_a2 != token_a
     end
 
-    test "named function! variant raises on error" do
-      # The bang function should work for success case
-      token = TestExpirables.cluster_lazy_keyed!("cherry")
+    test "fetch!/2 raises on error" do
+      token = TestExpirables.fetch!(:cluster_lazy_keyed, "cherry")
       assert String.starts_with?(token, "cluster_lazy_keyed_cherry_")
-    end
-
-    test "generic fetch/2 and clear/2 work" do
-      {:ok, t1, _} = TestExpirables.fetch(:cluster_lazy_keyed, "mango")
-      assert_receive {:fetch, :cluster_lazy_keyed, "mango", _}
-
-      {:ok, t2, _} = TestExpirables.fetch(:cluster_lazy_keyed, "mango")
-      refute_receive {:fetch, :cluster_lazy_keyed, "mango", _}
-      assert t1 == t2
-
-      TestExpirables.clear(:cluster_lazy_keyed, "mango")
-
-      {:ok, t3, _} = TestExpirables.fetch(:cluster_lazy_keyed, "mango")
-      assert_receive {:fetch, :cluster_lazy_keyed, "mango", _}
-      assert t3 != t1
     end
   end
 
   describe "keyed expirables (cluster, eager)" do
     test "different keys get independent eager refresh" do
-      {:ok, token_a, _} = TestExpirables.cluster_eager_keyed("apple")
+      {:ok, token_a, _} = TestExpirables.fetch(:cluster_eager_keyed, "apple")
       assert_receive {:fetch, :cluster_eager_keyed, "apple", _}
 
-      {:ok, token_b, _} = TestExpirables.cluster_eager_keyed("banana")
+      {:ok, token_b, _} = TestExpirables.fetch(:cluster_eager_keyed, "banana")
       assert_receive {:fetch, :cluster_eager_keyed, "banana", _}
 
       assert token_a != token_b
@@ -422,8 +377,8 @@ defmodule ExpirableStore.SingleNodeTest do
       assert_receive {:fetch, :cluster_eager_keyed, "apple", _}
       assert_receive {:fetch, :cluster_eager_keyed, "banana", _}
 
-      {:ok, token_a2, _} = TestExpirables.cluster_eager_keyed("apple")
-      {:ok, token_b2, _} = TestExpirables.cluster_eager_keyed("banana")
+      {:ok, token_a2, _} = TestExpirables.fetch(:cluster_eager_keyed, "apple")
+      {:ok, token_b2, _} = TestExpirables.fetch(:cluster_eager_keyed, "banana")
 
       assert token_a2 != token_a
       assert token_b2 != token_b
@@ -433,27 +388,27 @@ defmodule ExpirableStore.SingleNodeTest do
       group_a = {:cluster, :keyed, TestExpirables, :cluster_eager_keyed, "apple"}
       assert length(:pg.get_members(:expirable_store, group_a)) == 0
 
-      {:ok, _, _} = TestExpirables.cluster_eager_keyed("apple")
+      {:ok, _, _} = TestExpirables.fetch(:cluster_eager_keyed, "apple")
       assert length(:pg.get_members(:expirable_store, group_a)) == 1
     end
   end
 
   describe "keyed expirables (local, lazy)" do
     test "different keys are cached independently" do
-      {:ok, token_a, _} = TestExpirables.local_lazy_keyed("apple")
+      {:ok, token_a, _} = TestExpirables.fetch(:local_lazy_keyed, "apple")
       assert_receive {:fetch, :local_lazy_keyed, "apple", _}
 
-      {:ok, token_b, _} = TestExpirables.local_lazy_keyed("banana")
+      {:ok, token_b, _} = TestExpirables.fetch(:local_lazy_keyed, "banana")
       assert_receive {:fetch, :local_lazy_keyed, "banana", _}
 
       assert token_a != token_b
     end
 
     test "same key returns cached value" do
-      {:ok, token1, _} = TestExpirables.local_lazy_keyed("apple")
+      {:ok, token1, _} = TestExpirables.fetch(:local_lazy_keyed, "apple")
       assert_receive {:fetch, :local_lazy_keyed, "apple", _}
 
-      {:ok, token2, _} = TestExpirables.local_lazy_keyed("apple")
+      {:ok, token2, _} = TestExpirables.fetch(:local_lazy_keyed, "apple")
       refute_receive {:fetch, :local_lazy_keyed, "apple", _}
 
       assert token1 == token2
@@ -463,17 +418,17 @@ defmodule ExpirableStore.SingleNodeTest do
       group_a = {:local, node(), :keyed, TestExpirables, :local_lazy_keyed, "apple"}
       assert length(:pg.get_members(:expirable_store, group_a)) == 0
 
-      {:ok, _, _} = TestExpirables.local_lazy_keyed("apple")
+      {:ok, _, _} = TestExpirables.fetch(:local_lazy_keyed, "apple")
       assert length(:pg.get_members(:expirable_store, group_a)) == 1
     end
 
     test "expiration works independently per key" do
-      {:ok, token_a, _} = TestExpirables.local_lazy_keyed("apple")
+      {:ok, token_a, _} = TestExpirables.fetch(:local_lazy_keyed, "apple")
       assert_receive {:fetch, :local_lazy_keyed, "apple", _}
 
       Process.sleep(210)
 
-      {:ok, token_a2, _} = TestExpirables.local_lazy_keyed("apple")
+      {:ok, token_a2, _} = TestExpirables.fetch(:local_lazy_keyed, "apple")
       assert_receive {:fetch, :local_lazy_keyed, "apple", _}
       assert token_a2 != token_a
     end
@@ -481,10 +436,10 @@ defmodule ExpirableStore.SingleNodeTest do
 
   describe "keyed expirables (local, eager)" do
     test "different keys get independent eager refresh" do
-      {:ok, token_a, _} = TestExpirables.local_eager_keyed("apple")
+      {:ok, token_a, _} = TestExpirables.fetch(:local_eager_keyed, "apple")
       assert_receive {:fetch, :local_eager_keyed, "apple", _}
 
-      {:ok, token_b, _} = TestExpirables.local_eager_keyed("banana")
+      {:ok, token_b, _} = TestExpirables.fetch(:local_eager_keyed, "banana")
       assert_receive {:fetch, :local_eager_keyed, "banana", _}
 
       assert token_a != token_b
@@ -495,8 +450,8 @@ defmodule ExpirableStore.SingleNodeTest do
       assert_receive {:fetch, :local_eager_keyed, "apple", _}
       assert_receive {:fetch, :local_eager_keyed, "banana", _}
 
-      {:ok, token_a2, _} = TestExpirables.local_eager_keyed("apple")
-      {:ok, token_b2, _} = TestExpirables.local_eager_keyed("banana")
+      {:ok, token_a2, _} = TestExpirables.fetch(:local_eager_keyed, "apple")
+      {:ok, token_b2, _} = TestExpirables.fetch(:local_eager_keyed, "banana")
 
       assert token_a2 != token_a
       assert token_b2 != token_b
@@ -506,7 +461,7 @@ defmodule ExpirableStore.SingleNodeTest do
       group_a = {:local, node(), :keyed, TestExpirables, :local_eager_keyed, "apple"}
       assert length(:pg.get_members(:expirable_store, group_a)) == 0
 
-      {:ok, _, _} = TestExpirables.local_eager_keyed("apple")
+      {:ok, _, _} = TestExpirables.fetch(:local_eager_keyed, "apple")
       assert length(:pg.get_members(:expirable_store, group_a)) == 1
     end
   end
@@ -539,46 +494,39 @@ defmodule ExpirableStore.SingleNodeTest do
   end
 
   # ===========================================================================
-  # require_init
+  # require_initial_state
   # ===========================================================================
 
-  describe "require_init (non-keyed)" do
-    test "fetch returns :error before init" do
-      :error = TestExpirables.fetch(:require_init_example)
+  describe "require_initial_state (non-keyed)" do
+    test "fetch returns {:error, :state_required} before set_state" do
+      {:error, :state_required} = TestExpirables.fetch(:require_init_example)
     end
 
-    test "fetch works after init" do
-      TestExpirables.init(:require_init_example, %{token_prefix: "hello"})
+    test "fetch works after set_state" do
+      TestExpirables.set_state(:require_init_example, %{token_prefix: "hello"})
 
       {:ok, token, _} = TestExpirables.fetch(:require_init_example)
       assert_receive {:fetch, :require_init_example, %{token_prefix: "hello"}, _}
       assert String.starts_with?(token, "require_init_hello_")
     end
 
-    test "named init function works" do
-      TestExpirables.init_require_init_example(%{token_prefix: "named"})
-
-      {:ok, token, _} = TestExpirables.fetch(:require_init_example)
-      assert String.starts_with?(token, "require_init_named_")
-    end
-
     test "clear requires re-init" do
-      TestExpirables.init(:require_init_example, %{token_prefix: "abc"})
+      TestExpirables.set_state(:require_init_example, %{token_prefix: "abc"})
       {:ok, _, _} = TestExpirables.fetch(:require_init_example)
 
       TestExpirables.clear(:require_init_example)
 
-      :error = TestExpirables.fetch(:require_init_example)
+      {:error, :state_required} = TestExpirables.fetch(:require_init_example)
     end
   end
 
-  describe "require_init (keyed)" do
-    test "fetch returns :error before init" do
-      :error = TestExpirables.fetch(:require_init_keyed, "k1")
+  describe "require_initial_state (keyed)" do
+    test "fetch returns {:error, :state_required} before set_state" do
+      {:error, :state_required} = TestExpirables.fetch(:require_init_keyed, "k1")
     end
 
-    test "fetch works after init" do
-      TestExpirables.init(:require_init_keyed, "k1", %{token_prefix: "hello"})
+    test "fetch works after set_state" do
+      TestExpirables.set_state(:require_init_keyed, "k1", %{token_prefix: "hello"})
 
       {:ok, token, _} = TestExpirables.fetch(:require_init_keyed, "k1")
       assert_receive {:fetch, :require_init_keyed, "k1", %{token_prefix: "hello"}, _}
@@ -586,8 +534,8 @@ defmodule ExpirableStore.SingleNodeTest do
     end
 
     test "different keys are independent" do
-      TestExpirables.init(:require_init_keyed, "k1", %{token_prefix: "one"})
-      TestExpirables.init(:require_init_keyed, "k2", %{token_prefix: "two"})
+      TestExpirables.set_state(:require_init_keyed, "k1", %{token_prefix: "one"})
+      TestExpirables.set_state(:require_init_keyed, "k2", %{token_prefix: "two"})
 
       {:ok, t1, _} = TestExpirables.fetch(:require_init_keyed, "k1")
       {:ok, t2, _} = TestExpirables.fetch(:require_init_keyed, "k2")
@@ -596,18 +544,18 @@ defmodule ExpirableStore.SingleNodeTest do
       assert String.starts_with?(t2, "require_init_keyed_k2_two_")
 
       # uninit key still fails
-      :error = TestExpirables.fetch(:require_init_keyed, "k3")
+      {:error, :state_required} = TestExpirables.fetch(:require_init_keyed, "k3")
     end
 
     test "clear specific key requires re-init for that key only" do
-      TestExpirables.init(:require_init_keyed, "k1", %{token_prefix: "one"})
-      TestExpirables.init(:require_init_keyed, "k2", %{token_prefix: "two"})
+      TestExpirables.set_state(:require_init_keyed, "k1", %{token_prefix: "one"})
+      TestExpirables.set_state(:require_init_keyed, "k2", %{token_prefix: "two"})
       {:ok, _, _} = TestExpirables.fetch(:require_init_keyed, "k1")
       {:ok, _, _} = TestExpirables.fetch(:require_init_keyed, "k2")
 
       TestExpirables.clear(:require_init_keyed, "k1")
 
-      :error = TestExpirables.fetch(:require_init_keyed, "k1")
+      {:error, :state_required} = TestExpirables.fetch(:require_init_keyed, "k1")
       {:ok, _, _} = TestExpirables.fetch(:require_init_keyed, "k2")
     end
   end

@@ -3,20 +3,20 @@ defmodule ExpirableStore.Store do
 
   # Agent state: {cached_result, user_state}
   # cached_result: {:ok, value, expires_at} | :error | :not_fetched
-  # user_state: any term (nil when require_init is false)
+  # user_state: any term (nil when require_initial_state is false)
 
   # ===========================================================================
   # Public API
   # ===========================================================================
 
-  def init(module, name, init_state, scope) do
+  def set_state(module, name, state, scope) do
     group = make_group(scope, module, name)
-    do_init(group, init_state, scope)
+    do_set_state(group, state, scope)
   end
 
-  def init(module, name, key, init_state, scope) do
+  def set_state(module, name, key, state, scope) do
     group = make_group(scope, module, name, key)
-    do_init(group, init_state, scope)
+    do_set_state(group, state, scope)
   end
 
   def fetch(module, name, fetch_fn, refresh, scope, require_init) do
@@ -87,7 +87,7 @@ defmodule ExpirableStore.Store do
     :global.trans({group, self()}, fun, [node()])
   end
 
-  defp do_init(group, init_state, scope) do
+  defp do_set_state(group, init_state, scope) do
     global_trans(group, scope, fn ->
       local_pid = get_local_agent(group)
 
@@ -106,7 +106,7 @@ defmodule ExpirableStore.Store do
 
     if is_nil(local_pid) or not Process.alive?(local_pid) do
       if require_init do
-        :error
+        {:error, :state_required}
       else
         acquire_lock_and_fetch(group, fetch_fn, refresh, scope, nil)
       end
