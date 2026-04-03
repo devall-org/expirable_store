@@ -13,9 +13,9 @@ defmodule TestExpirables do
         _ -> :ok
       end
 
-      Process.sleep(500)
+      Process.sleep(250)
       token = "cluster_lazy_#{:rand.uniform(10000)}"
-      expires_at = System.system_time(:millisecond) + 2000
+      expires_at = System.system_time(:millisecond) + 1000
       {:ok, token, expires_at, nil}
     end
 
@@ -30,7 +30,7 @@ defmodule TestExpirables do
         _ -> :ok
       end
 
-      Process.sleep(500)
+      Process.sleep(250)
       {:error, nil}
     end
 
@@ -49,13 +49,13 @@ defmodule TestExpirables do
         _ -> :ok
       end
 
-      Process.sleep(500)
+      Process.sleep(250)
       token = "cluster_eager_#{:rand.uniform(10000)}"
-      expires_at = System.system_time(:millisecond) + 2000
+      expires_at = System.system_time(:millisecond) + 1000
       {:ok, token, expires_at, nil}
     end
 
-    refresh {:eager, before_expiry: 200}
+    refresh {:eager, before_expiry: 100}
     scope :cluster
   end
 
@@ -70,9 +70,9 @@ defmodule TestExpirables do
         _ -> :ok
       end
 
-      Process.sleep(500)
+      Process.sleep(250)
       token = "local_lazy_#{:rand.uniform(10000)}_#{node()}"
-      expires_at = System.system_time(:millisecond) + 2000
+      expires_at = System.system_time(:millisecond) + 1000
       {:ok, token, expires_at, nil}
     end
 
@@ -91,13 +91,13 @@ defmodule TestExpirables do
         _ -> :ok
       end
 
-      Process.sleep(500)
+      Process.sleep(250)
       token = "local_eager_#{:rand.uniform(10000)}"
-      expires_at = System.system_time(:millisecond) + 2000
+      expires_at = System.system_time(:millisecond) + 1000
       {:ok, token, expires_at, nil}
     end
 
-    refresh {:eager, before_expiry: 200}
+    refresh {:eager, before_expiry: 100}
     scope :local
   end
 
@@ -112,7 +112,7 @@ defmodule TestExpirables do
         _ -> :ok
       end
 
-      Process.sleep(500)
+      Process.sleep(250)
       token = "never_expires_#{:rand.uniform(10000)}"
       {:ok, token, :infinity, nil}
     end
@@ -128,12 +128,12 @@ defmodule TestExpirables do
         _ -> :ok
       end
 
-      Process.sleep(500)
+      Process.sleep(250)
       token = "never_expires_eager_#{:rand.uniform(10000)}"
       {:ok, token, :infinity, nil}
     end
 
-    refresh {:eager, before_expiry: 200}
+    refresh {:eager, before_expiry: 100}
     scope :cluster
   end
 
@@ -148,9 +148,9 @@ defmodule TestExpirables do
         _ -> :ok
       end
 
-      Process.sleep(500)
+      Process.sleep(250)
       token = "cluster_lazy_keyed_#{key}_#{:rand.uniform(10000)}"
-      expires_at = System.system_time(:millisecond) + 2000
+      expires_at = System.system_time(:millisecond) + 1000
       {:ok, token, expires_at, nil}
     end
 
@@ -170,14 +170,14 @@ defmodule TestExpirables do
         _ -> :ok
       end
 
-      Process.sleep(500)
+      Process.sleep(250)
       token = "cluster_eager_keyed_#{key}_#{:rand.uniform(10000)}"
-      expires_at = System.system_time(:millisecond) + 2000
+      expires_at = System.system_time(:millisecond) + 1000
       {:ok, token, expires_at, nil}
     end
 
     keyed true
-    refresh {:eager, before_expiry: 200}
+    refresh {:eager, before_expiry: 100}
     scope :cluster
   end
 
@@ -192,9 +192,9 @@ defmodule TestExpirables do
         _ -> :ok
       end
 
-      Process.sleep(500)
+      Process.sleep(250)
       token = "local_lazy_keyed_#{key}_#{:rand.uniform(10000)}"
-      expires_at = System.system_time(:millisecond) + 2000
+      expires_at = System.system_time(:millisecond) + 1000
       {:ok, token, expires_at, nil}
     end
 
@@ -214,14 +214,14 @@ defmodule TestExpirables do
         _ -> :ok
       end
 
-      Process.sleep(500)
+      Process.sleep(250)
       token = "local_eager_keyed_#{key}_#{:rand.uniform(10000)}"
-      expires_at = System.system_time(:millisecond) + 2000
+      expires_at = System.system_time(:millisecond) + 1000
       {:ok, token, expires_at, nil}
     end
 
     keyed true
-    refresh {:eager, before_expiry: 200}
+    refresh {:eager, before_expiry: 100}
     scope :local
   end
 
@@ -238,9 +238,9 @@ defmodule TestExpirables do
         _ -> :ok
       end
 
-      Process.sleep(500)
+      Process.sleep(250)
       token = "stateful_counter_#{count}"
-      expires_at = System.system_time(:millisecond) + 2000
+      expires_at = System.system_time(:millisecond) + 1000
       {:ok, token, expires_at, count}
     end
 
@@ -259,9 +259,9 @@ defmodule TestExpirables do
         _ -> :ok
       end
 
-      Process.sleep(500)
+      Process.sleep(250)
       token = "require_init_#{state[:token_prefix]}_#{:rand.uniform(10000)}"
-      expires_at = System.system_time(:millisecond) + 2000
+      expires_at = System.system_time(:millisecond) + 1000
       {:ok, token, expires_at, state}
     end
 
@@ -281,9 +281,9 @@ defmodule TestExpirables do
         _ -> :ok
       end
 
-      Process.sleep(500)
+      Process.sleep(250)
       token = "require_init_keyed_#{key}_#{state[:token_prefix]}_#{:rand.uniform(10000)}"
-      expires_at = System.system_time(:millisecond) + 2000
+      expires_at = System.system_time(:millisecond) + 1000
       {:ok, token, expires_at, state}
     end
 
