@@ -5,7 +5,7 @@ spark_locals_without_parens = [
   refresh: 1,
   scope: 1,
   keyed: 1,
-  require_init: 1
+  require_initial_state: 1
 ]
 
 [
