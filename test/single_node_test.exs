@@ -31,7 +31,7 @@ defmodule ExpirableStore.SingleNodeTest do
       assert token1 == token2
       assert expires_at1 == expires_at2
 
-      Process.sleep(840)
+      Process.sleep(630)
 
       {:ok, token3, expires_at3} = TestExpirables.fetch(:cluster_lazy)
       assert_receive {:fetch, :cluster_lazy, _}
@@ -79,8 +79,8 @@ defmodule ExpirableStore.SingleNodeTest do
       {:ok, token1, _} = TestExpirables.fetch(:cluster_eager)
       assert_receive {:fetch, :cluster_eager, _}
 
-      # Wait for eager refresh to complete: 800ms * 0.9 delay + 200ms fetch + 40ms margin = 960ms
-      Process.sleep(960)
+      # Wait for eager refresh to complete: 600ms * 0.9 delay + 150ms fetch + 30ms margin = 720ms
+      Process.sleep(720)
 
       # Eager refresh should have happened in background
       assert_receive {:fetch, :cluster_eager, _}
@@ -123,7 +123,7 @@ defmodule ExpirableStore.SingleNodeTest do
       assert token1 == token2
       assert expires_at1 == expires_at2
 
-      Process.sleep(840)
+      Process.sleep(630)
 
       {:ok, token3, _} = TestExpirables.fetch(:local_lazy)
       assert_receive {:fetch, :local_lazy, _}
@@ -155,8 +155,8 @@ defmodule ExpirableStore.SingleNodeTest do
       {:ok, token1, _} = TestExpirables.fetch(:local_eager)
       assert_receive {:fetch, :local_eager, _}
 
-      # Wait for eager refresh to complete: 800ms * 0.9 delay + 200ms fetch + 40ms margin = 960ms
-      Process.sleep(960)
+      # Wait for eager refresh to complete: 600ms * 0.9 delay + 150ms fetch + 30ms margin = 720ms
+      Process.sleep(720)
 
       assert_receive {:fetch, :local_eager, _}
       {:ok, token2, _} = TestExpirables.fetch(:local_eager)
@@ -231,7 +231,7 @@ defmodule ExpirableStore.SingleNodeTest do
       assert_receive {:fetch, :never_expires, _}
 
       # Wait longer than normal expiry time
-      Process.sleep(1200)
+      Process.sleep(900)
 
       # Should still return cached value without fetching
       {:ok, token2, :infinity} = TestExpirables.fetch(:never_expires)
@@ -255,7 +255,7 @@ defmodule ExpirableStore.SingleNodeTest do
       assert_receive {:fetch, :never_expires_eager, _}
 
       # Wait for when eager refresh would normally happen
-      Process.sleep(1200)
+      Process.sleep(900)
 
       # No background refresh should occur
       refute_receive {:fetch, :never_expires_eager, _}
@@ -349,7 +349,7 @@ defmodule ExpirableStore.SingleNodeTest do
       {:ok, token_a, _} = TestExpirables.fetch(:cluster_lazy_keyed, "apple")
       assert_receive {:fetch, :cluster_lazy_keyed, "apple", _}
 
-      Process.sleep(840)
+      Process.sleep(630)
 
       {:ok, token_a2, _} = TestExpirables.fetch(:cluster_lazy_keyed, "apple")
       assert_receive {:fetch, :cluster_lazy_keyed, "apple", _}
@@ -372,7 +372,7 @@ defmodule ExpirableStore.SingleNodeTest do
 
       assert token_a != token_b
 
-      Process.sleep(960)
+      Process.sleep(720)
 
       assert_receive {:fetch, :cluster_eager_keyed, "apple", _}
       assert_receive {:fetch, :cluster_eager_keyed, "banana", _}
@@ -426,7 +426,7 @@ defmodule ExpirableStore.SingleNodeTest do
       {:ok, token_a, _} = TestExpirables.fetch(:local_lazy_keyed, "apple")
       assert_receive {:fetch, :local_lazy_keyed, "apple", _}
 
-      Process.sleep(840)
+      Process.sleep(630)
 
       {:ok, token_a2, _} = TestExpirables.fetch(:local_lazy_keyed, "apple")
       assert_receive {:fetch, :local_lazy_keyed, "apple", _}
@@ -445,7 +445,7 @@ defmodule ExpirableStore.SingleNodeTest do
       assert token_a != token_b
 
       # Wait for eager refresh: 200ms - 20ms before_expiry + 50ms fetch + margin
-      Process.sleep(960)
+      Process.sleep(720)
 
       assert_receive {:fetch, :local_eager_keyed, "apple", _}
       assert_receive {:fetch, :local_eager_keyed, "banana", _}
@@ -476,7 +476,7 @@ defmodule ExpirableStore.SingleNodeTest do
       assert_receive {:fetch, :stateful_counter, 1, _}
 
       # Wait for expiration
-      Process.sleep(840)
+      Process.sleep(630)
 
       {:ok, "stateful_counter_2", _} = TestExpirables.fetch(:stateful_counter)
       assert_receive {:fetch, :stateful_counter, 2, _}
