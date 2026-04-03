@@ -60,20 +60,24 @@ end
 
 ## API Usage
 
+Add `require MyApp.Expirables` to get compile-time errors for unknown names and keyed/unkeyed arity mismatches. Without `require`, calls still work at runtime.
+
 ```elixir
+require MyApp.Expirables  # enables compile-time name validation
+
 # Non-keyed (stateless)
-MyApp.Expirables.fetch(:github_access_token)   # {:ok, value, expires_at} or :error
+MyApp.Expirables.fetch(:github_access_token)   # {:ok, value, expires_at} or {:error, :fetch_failed}
 MyApp.Expirables.fetch!(:github_access_token)  # value or raises
 MyApp.Expirables.clear(:github_access_token)
 MyApp.Expirables.clear_all()
 
 # require_initial_state: must call set_state before fetch
 MyApp.Expirables.set_state(:oauth_token, %{refresh_token: get_from_db()})
-MyApp.Expirables.fetch(:oauth_token)           # {:ok, access_token, expires_at} or :error
+MyApp.Expirables.fetch(:oauth_token)           # {:ok, access_token, expires_at} or {:error, :state_required}
 
 # Keyed + require_initial_state
 MyApp.Expirables.set_state(:tenant_api_key, "t1", %{secret: get_secret()})
-MyApp.Expirables.fetch(:tenant_api_key, "t1")  # {:ok, value, expires_at} or :error
+MyApp.Expirables.fetch(:tenant_api_key, "t1")  # {:ok, value, expires_at} or {:error, reason}
 MyApp.Expirables.fetch!(:tenant_api_key, "t1") # value or raises
 MyApp.Expirables.clear(:tenant_api_key, "t1")  # specific key
 MyApp.Expirables.clear(:tenant_api_key)        # all keys
@@ -93,7 +97,8 @@ MyApp.Expirables.clear(:tenant_api_key)        # all keys
 - **Refresh**: `:lazy` refreshes on next fetch after expiry; `{:eager, before_expiry: ms}` refreshes in background before expiry (no-op for `:infinity`)
 - **Scope**: `:cluster` replicates across nodes via `:pg`; `:local` is node-local only
 - **Keyed**: key can be any Erlang term; number of keys need not be known at compile time
-- **require_initial_state**: fetch returns `:error` until `set_state` is called; after `clear`, `set_state` is required again
+- **require_initial_state**: fetch returns `{:error, :state_required}` until `set_state` is called; after `clear`, `set_state` is required again
+- **Compile-time validation**: all public functions are macros — `require` the module to catch unknown names or keyed/unkeyed arity mismatches at compile time
 
 ## Key Behaviors
 

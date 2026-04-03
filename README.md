@@ -15,6 +15,7 @@ Perfect for caching OAuth tokens, API keys, and other time-sensitive data that s
 - **Keyed expirables**: Same logic, independent cache and timer per runtime key
 - **Runtime state injection**: `require_initial_state` option for providing external state before first fetch
 - **Concurrency-safe**: Concurrent access protected by `:global.trans/2`
+- **Compile-time validation**: `require` the module to catch unknown names and keyed/unkeyed arity mismatches at build time
 - **Clean DSL**: [Spark](https://github.com/ash-project/spark)-based compile-time configuration
 
 ## Installation
@@ -84,6 +85,9 @@ end
 ```
 
 ```elixir
+# Add require for compile-time name validation (optional but recommended)
+require MyApp.Expirables
+
 # Fetch
 {:ok, token, _} = MyApp.Expirables.fetch(:github_access_token)
 token = MyApp.Expirables.fetch!(:github_access_token)
@@ -150,17 +154,18 @@ MyApp.Expirables.set_state(:oauth_token, %{refresh_token: get_from_db()})
 
 # After clear, set_state is required again
 MyApp.Expirables.clear(:oauth_token)
-:error = MyApp.Expirables.fetch(:oauth_token)
+{:error, :state_required} = MyApp.Expirables.fetch(:oauth_token)
 ```
 
 ## API
 
-Generic functions (always available):
 - `fetch(name)` / `fetch(name, key)` — returns `{:ok, value, expires_at}`, `{:error, :fetch_failed}`, or `{:error, :state_required}`
 - `fetch!(name)` / `fetch!(name, key)` — returns value or raises
 - `set_state(name, state)` / `set_state(name, key, state)` — sets state; can be called at any time
 - `clear(name)` / `clear(name, key)`
 - `clear_all()`
+
+All functions are macros — add `require MyApp.Expirables` to enable compile-time validation of expirable names and keyed/unkeyed arity mismatches.
 
 ## Key Behaviors
 

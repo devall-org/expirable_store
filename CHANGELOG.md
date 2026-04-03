@@ -8,6 +8,7 @@
 - **Breaking**: `fetch/2,3` now returns `{:error, reason}` instead of bare `:error`
   - `{:error, :fetch_failed}` — the fetch function returned an error
   - `{:error, :state_required}` — `require_initial_state: true` and `set_state` has not been called
+- Add compile-time name validation — `require MyApp.Expirables` to get `CompileError` for unknown names and keyed/unkeyed arity mismatches at build time
 
 Migration:
 - `MyApp.Expirables.oauth_token()` → `MyApp.Expirables.fetch(:oauth_token)`
