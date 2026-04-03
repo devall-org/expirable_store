@@ -1,5 +1,6 @@
 defmodule ExpirableStore.SingleNodeTest do
   use ExUnit.Case, async: false
+  require TestExpirables
   doctest ExpirableStore
 
   setup do
