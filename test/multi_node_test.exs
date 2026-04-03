@@ -40,10 +40,10 @@ defmodule ExpirableStore.MultiNodeTest do
     end
 
     test "does not store fetch failures", %{node2: node2} do
-      :error = TestExpirables.fetch(:cluster_lazy_fail)
+      {:error, :fetch_failed} = TestExpirables.fetch(:cluster_lazy_fail)
       assert_receive {:fetch, :cluster_lazy_fail, _}
 
-      :error = :erpc.call(node2, TestExpirables, :fetch, [:cluster_lazy_fail])
+      {:error, :fetch_failed} = :erpc.call(node2, TestExpirables, :fetch, [:cluster_lazy_fail])
       assert_receive {:fetch, :cluster_lazy_fail, _}
     end
 
